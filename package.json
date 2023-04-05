@@ -1,0 +1,42 @@
+{
+  "name": "helmfile-action",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Helmfile setup action",
+  "main": "src/main.ts",
+  "scripts": {
+    "build": "tsc",
+    "format": "prettier --write '**/*.ts'",
+    "format-check": "prettier --check '**/*.ts'",
+    "lint": "eslint src/**/*.ts",
+    "package": "ncc build --source-map --license licenses.txt",
+    "test": "echo 'No tests yet'",
+    "all": "npm run build && npm run format && npm run lint && npm run package"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/helmfile/helmfile-action.git"
+  },
+  "keywords": [
+    "actions",
+    "helmfile",
+    "setup"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@actions/core": "^1.10.0",
+    "@actions/exec": "^1.1.1",
+    "@actions/github": "^5.1.1",
+    "@actions/tool-cache": "^2.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^18.15.11",
+    "@typescript-eslint/eslint-plugin": "^5.57.1",
+    "@vercel/ncc": "^0.36.1",
+    "eslint-plugin-github": "^4.7.0",
+    "eslint": "^8.37.0",
+    "prettier": "^2.8.7",
+    "typescript": "^5.0.3"
+  }
+}

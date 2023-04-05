@@ -1,0 +1,22 @@
+name: 'helmfile-action'
+description: 'Install and run Helmfile'
+author: 'helmfile'
+inputs:
+  helmfile-args:
+    required: true
+    description: 'Helmfile arguments'
+  helmfile-version:
+    required: false
+    description: 'Helmfile version'
+    default: 'latest'
+  helm-version:
+    required: false
+    description: 'Helm version'
+    default: 'latest'
+  helm-plugins:
+    required: false
+    description: 'Comma separated list of Helm plugins to install'
+    default: 'https://github.com/databus23/helm-diff'
+runs:
+  using: 'node16'
+  main: 'dist/index.js'
