@@ -28,5 +28,9 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: ./
+        with:
+          helm-plugins: >
+            https://github.com/databus23/helm-diff,
+            https://github.com/jkroepke/helm-secrets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -13494,12 +13494,10 @@ function installHelm(version) {
 exports.installHelm = installHelm;
 function installHelmPlugins(plugins) {
     return __awaiter(this, void 0, void 0, function* () {
-        const options = {
-            silent: true
-        };
         for (const plugin of plugins) {
             try {
-                yield (0, exec_1.exec)('helm', ['plugin', 'install', plugin], options);
+                yield (0, exec_1.exec)(`helm plugin install ${plugin.trim()}`);
+                yield (0, exec_1.exec)('helm plugin list');
             }
             catch (error) {
                 if (error instanceof Error)
