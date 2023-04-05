@@ -8,7 +8,7 @@
     "build": "tsc",
     "format": "prettier --no-error-on-unmatched-pattern --config ./.prettierrc.js --write \"**/*.{ts,yml,yaml}\"",
     "format-check": "prettier --no-error-on-unmatched-pattern --config ./.prettierrc.js --check \"**/*.{ts,yml,yaml}\"",
-    "lint": "eeslint --config ./.eslintrc.js \"**/*.ts\"",
+    "lint": "eslint --config ./.eslintrc.js \"**/*.ts\"",
     "lint:fix": "eslint --config ./.eslintrc.js \"**/*.ts\" --fix",
     "package": "ncc build --source-map --license licenses.txt",
     "test": "echo 'No tests yet'",
