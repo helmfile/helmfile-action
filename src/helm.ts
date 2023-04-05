@@ -37,12 +37,10 @@ export async function installHelm(version: string): Promise<void> {
 }
 
 export async function installHelmPlugins(plugins: string[]): Promise<void> {
-  const options = {
-    silent: true
-  };
   for (const plugin of plugins) {
     try {
-      await exec('helm', ['plugin', 'install', plugin], options);
+      await exec(`helm plugin install ${plugin.trim()}`);
+      await exec('helm plugin list');
     } catch (error) {
       if (error instanceof Error) core.warning(error.message);
     }
