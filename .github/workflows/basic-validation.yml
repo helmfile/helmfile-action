@@ -11,6 +11,11 @@ on:
     paths-ignore:
       - '**.md'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+
 jobs:
   call-basic-validation:
     name: Basic validation
