@@ -17,6 +17,9 @@ inputs:
     required: false
     description: 'Comma separated list of Helm plugins to install'
     default: 'https://github.com/databus23/helm-diff'
+outputs:
+  exit-code:
+    description: 'Exit code of helmfile. Useful to handle diff --detailed-exitcode'
 runs:
   using: 'node16'
   main: 'dist/index.js'
