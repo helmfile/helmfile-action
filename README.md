@@ -2,14 +2,12 @@
 
 Setup [Helmfile](https://github.com/helmfile/helmfile) and [Helm](https://github.com/helm/helm) for use in GitHub Actions.
 
-This action works on Linux, MacOS and Windows
+This action works on Linux, macOS and Windows
 
 ```yaml
 - uses: helmfile/helmfile-action@v1.0.0
   with:
     helmfile-args: apply
-  env:
-    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # required, if explicit versions are not set
 ```
 
 ## Optional Inputs
@@ -38,4 +36,4 @@ $ npm install
 $ npm run all
 ```
 
-> `dist/*` shoud be included in commit.
+> `dist/*` should be included in commit.

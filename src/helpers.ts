@@ -1,4 +1,4 @@
-import {getOctokit} from '@actions/github';
+import * as http from '@actions/http-client';
 import * as tc from '@actions/tool-cache';
 import os from 'os';
 
@@ -35,9 +35,11 @@ export async function resolveLatest(
   owner: string,
   repo: string
 ): Promise<string> {
-  const octokit = getOctokit(process.env.GITHUB_TOKEN!);
-  const response = await octokit.rest.repos.getLatestRelease({owner, repo});
-  return response.data.tag_name;
+  const httpClient = new http.HttpClient();
+  const response = await httpClient.getJson<any>(
+    `https://github.com/${owner}/${repo}/releases/latest`
+  );
+  return response.result.tag_name;
 }
 
 export async function cacheDir(
