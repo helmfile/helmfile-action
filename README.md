@@ -5,7 +5,7 @@ Setup [Helmfile](https://github.com/helmfile/helmfile) and [Helm](https://github
 This action works on Linux, MacOS and Windows
 
 ```yaml
-- uses: helmfile/helmfile-action@v1
+- uses: helmfile/helmfile-action@v1.0.0
   with:
     helmfile-args: apply
   env:
@@ -21,7 +21,7 @@ This action works on Linux, MacOS and Windows
 Example with optional inputs
 
 ```yaml
-- uses: helmfile/helmfile-action@v1
+- uses: helmfile/helmfile-action@v1.0.0
   with:
     helmfile-version: 'v0.150.0'
     helm-version: 'v3.11.0'
