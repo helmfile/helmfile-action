@@ -24,7 +24,17 @@ async function run(): Promise<void> {
       await installHelmPlugins(helmPlugins.split(','));
     }
 
-    await exec.exec(`helmfile ${helmfileArgs}`);
+    const processExitCode = await exec.exec(`helmfile ${helmfileArgs}`, [], {
+      ignoreReturnCode: true
+    });
+
+    core.setOutput('exit-code', processExitCode);
+
+    if (processExitCode !== 0 && processExitCode !== 2) {
+      throw new Error(
+        `The process 'helmfile ${helmfileArgs}' failed with exit code ${processExitCode}`
+      );
+    }
   } catch (error) {
     if (error instanceof Error) core.setFailed(error.message);
   }

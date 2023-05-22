@@ -6823,7 +6823,13 @@ function run() {
             if (helmPlugins.length > 0) {
                 yield (0, helm_1.installHelmPlugins)(helmPlugins.split(','));
             }
-            yield exec.exec(`helmfile ${helmfileArgs}`);
+            const processExitCode = yield exec.exec(`helmfile ${helmfileArgs}`, [], {
+                ignoreReturnCode: true
+            });
+            core.setOutput('exit-code', processExitCode);
+            if (processExitCode !== 0 && processExitCode !== 2) {
+                throw new Error(`The process 'helmfile ${helmfileArgs}' failed with exit code ${processExitCode}`);
+            }
         }
         catch (error) {
             if (error instanceof Error)
