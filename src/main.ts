@@ -26,14 +26,18 @@ async function run(): Promise<void> {
       await installHelmPlugins(helmPlugins.split(','));
     }
 
-    const options : exec.ExecOptions = {};
-    if (helmfileWorkDirectory != "") {
+    const options: exec.ExecOptions = {};
+    if (helmfileWorkDirectory != '') {
       options.cwd = helmfileWorkDirectory;
-    } 
+    }
 
-    options.ignoreReturnCode = true
-    
-    const processExitCode = await exec.exec(`helmfile ${helmfileArgs}`, [], options);
+    options.ignoreReturnCode = true;
+
+    const processExitCode = await exec.exec(
+      `helmfile ${helmfileArgs}`,
+      [],
+      options
+    );
 
     core.setOutput('exit-code', processExitCode);
 
