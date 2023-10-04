@@ -7,11 +7,13 @@ async function run(): Promise<void> {
   try {
     const helmfileArgs = core.getInput('helmfile-args');
     const helmfileVersion = core.getInput('helmfile-version');
+    const helmfileWorkDirectory = core.getInput('helmfile-workdirectory');
     const helmVersion = core.getInput('helm-version');
     const helmPlugins = core.getInput('helm-plugins');
 
     core.debug(`helmfile-args: ${helmfileArgs}`);
     core.debug(`helmfile-version: ${helmfileVersion}`);
+    core.debug(`helmfile-workdirectory: ${helmfileWorkDirectory}`);
     core.debug(`helm-version: ${helmVersion}`);
     core.debug(`helm-plugins: ${helmPlugins}`);
 
@@ -24,9 +26,14 @@ async function run(): Promise<void> {
       await installHelmPlugins(helmPlugins.split(','));
     }
 
-    const processExitCode = await exec.exec(`helmfile ${helmfileArgs}`, [], {
-      ignoreReturnCode: true
-    });
+    const options : exec.ExecOptions = {};
+    if (helmfileWorkDirectory != "") {
+      options.cwd = helmfileWorkDirectory;
+    } 
+
+    options.ignoreReturnCode = true
+    
+    const processExitCode = await exec.exec(`helmfile ${helmfileArgs}`, [], options);
 
     core.setOutput('exit-code', processExitCode);
 
