@@ -13,6 +13,10 @@ inputs:
     required: false
     description: 'Helm version'
     default: 'latest'
+  helmfile-workdirectory:
+    required: false
+    description: 'Helmfile working directory'
+    default: '.'
   helm-plugins:
     required: false
     description: 'Comma separated list of Helm plugins to install'
