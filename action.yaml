@@ -24,10 +24,10 @@ inputs:
 outputs:
   exit-code:
     description: 'Exit code of helmfile. Useful to handle diff --detailed-exitcode'
-  helmfile-output:
-    description: 'Output of helmfile diff'
-  helmfile-error:
-    description: 'Error of helmfile'    
+  helmfile-stdout:
+    description: 'Standard output of helmfile command'
+  helmfile-stderr:
+    description: 'Error output of helmfile command'    
 runs:
   using: 'node16'
   main: 'dist/index.js'

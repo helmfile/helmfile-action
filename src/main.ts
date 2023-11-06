@@ -3,6 +3,7 @@ import * as exec from '@actions/exec';
 import {installHelm, installHelmPlugins} from './helm';
 import {installHelmfile} from './helmfile';
 
+
 async function run(): Promise<void> {
   try {
     const helmfileArgs = core.getInput('helmfile-args');
@@ -39,21 +40,21 @@ async function run(): Promise<void> {
       options
     );
 
-    let helmfileOutput = '';
-    let helmfileError = '';
+    let helmfileStdout = '';
+    let helmfileStderr = '';
 
     options.listeners = {
       stdout: (data: Buffer) => {
-        helmfileOutput += data.toString();
+        helmfileStdout += data.toString();
       },
       stderr: (data: Buffer) => {
-        helmfileError += data.toString();
+        helmfileStderr += data.toString();
       }
     };
 
     core.setOutput('exit-code', processExitCode);
-    core.setOutput('helmfile-output', helmfileOutput);
-    core.setOutput('helmfile-error', helmfileError);
+    core.setOutput('helmfile-stdout', helmfileStdout);
+    core.setOutput('helmfile-stderr', helmfileStderr);
 
     if (processExitCode !== 0 && processExitCode !== 2) {
       throw new Error(
