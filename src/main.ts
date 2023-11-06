@@ -32,14 +32,6 @@ async function run(): Promise<void> {
       options.cwd = helmfileWorkDirectory;
     }
 
-    options.ignoreReturnCode = true;
-
-    const processExitCode = await exec.exec(
-      `helmfile ${helmfileArgs}`,
-      [],
-      options
-    );
-
     let helmfileStdout = '';
     let helmfileStderr = '';
 
@@ -52,6 +44,14 @@ async function run(): Promise<void> {
       }
     };
 
+    options.ignoreReturnCode = true;
+
+    const processExitCode = await exec.exec(
+      `helmfile ${helmfileArgs}`,
+      [],
+      options
+    );
+    
     core.setOutput('exit-code', processExitCode);
     core.setOutput('helmfile-stdout', helmfileStdout);
     core.setOutput('helmfile-stderr', helmfileStderr);
