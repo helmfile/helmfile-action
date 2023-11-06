@@ -39,7 +39,21 @@ async function run(): Promise<void> {
       options
     );
 
+    let helmfileOutput = '';
+    let helmfileError = '';
+
+    options.listeners = {
+      stdout: (data: Buffer) => {
+        helmfileOutput += data.toString();
+      },
+      stderr: (data: Buffer) => {
+        helmfileError += data.toString();
+      }
+    };
+
     core.setOutput('exit-code', processExitCode);
+    core.setOutput('helmfile-output', helmfileOutput);
+    core.setOutput('helmfile-error', helmfileError);
 
     if (processExitCode !== 0 && processExitCode !== 2) {
       throw new Error(
