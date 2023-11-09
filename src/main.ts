@@ -31,6 +31,18 @@ async function run(): Promise<void> {
       options.cwd = helmfileWorkDirectory;
     }
 
+    let helmfileStdout = '';
+    let helmfileStderr = '';
+
+    options.listeners = {
+      stdout: (data: Buffer) => {
+        helmfileStdout += data.toString();
+      },
+      stderr: (data: Buffer) => {
+        helmfileStderr += data.toString();
+      }
+    };
+
     options.ignoreReturnCode = true;
 
     const processExitCode = await exec.exec(
@@ -40,6 +52,8 @@ async function run(): Promise<void> {
     );
 
     core.setOutput('exit-code', processExitCode);
+    core.setOutput('helmfile-stdout', helmfileStdout);
+    core.setOutput('helmfile-stderr', helmfileStderr);
 
     if (processExitCode !== 0 && processExitCode !== 2) {
       throw new Error(
