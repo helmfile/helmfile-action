@@ -3,7 +3,6 @@ import * as exec from '@actions/exec';
 import {installHelm, installHelmPlugins} from './helm';
 import {installHelmfile} from './helmfile';
 
-
 async function run(): Promise<void> {
   try {
     const helmfileArgs = core.getInput('helmfile-args');
@@ -51,7 +50,7 @@ async function run(): Promise<void> {
       [],
       options
     );
-    
+
     core.setOutput('exit-code', processExitCode);
     core.setOutput('helmfile-stdout', helmfileStdout);
     core.setOutput('helmfile-stderr', helmfileStderr);
