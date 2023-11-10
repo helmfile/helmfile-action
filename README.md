@@ -30,6 +30,11 @@ Example with optional inputs
     helmfile-args: apply --environment prod
 ```
 
+## Outputs
+- `exit-code` : Exit code of helmfile. Useful to handle diff `--detailed-exitcode`.
+- `helmfile-stdout` : Standard output of helmfile command.
+- `helmfile-stderr` : Error output of helmfile command.
+
 ## Build action (for maintainer)
 
 ```
