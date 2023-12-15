@@ -1,5 +1,5 @@
 import * as core from '@actions/core';
-import {exec} from '@actions/exec';
+import {exec, getExecOutput} from '@actions/exec';
 import {
   arch,
   cacheDir,
@@ -39,7 +39,14 @@ export async function installHelm(version: string): Promise<void> {
 export async function installHelmPlugins(plugins: string[]): Promise<void> {
   for (const plugin of plugins) {
     try {
-      await exec(`helm plugin install ${plugin.trim()}`);
+      const result = await getExecOutput(`helm plugin install ${plugin.trim()}`, [], {
+        ignoreReturnCode: true
+      });
+      if (result.exitCode == 1 && result.stdout.includes('plugin already exists')) {
+        core.info(`Plugin ${plugin} already exists`);
+      } else {
+        throw new Error(result.stderr);
+      }
       await exec('helm plugin list');
     } catch (error) {
       if (error instanceof Error) core.warning(error.message);
