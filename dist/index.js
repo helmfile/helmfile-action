@@ -29590,8 +29590,9 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.installHelmfile = void 0;
+exports.HelmfileInit = exports.installHelmfile = void 0;
 const core = __importStar(__nccwpck_require__(2186));
+const exec_1 = __nccwpck_require__(1514);
 const helpers_1 = __nccwpck_require__(3015);
 function installHelmfile(version) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -29615,6 +29616,18 @@ function installHelmfile(version) {
     });
 }
 exports.installHelmfile = installHelmfile;
+function HelmfileInit() {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            yield (0, exec_1.exec)('helmfile init --force');
+        }
+        catch (error) {
+            if (error instanceof Error)
+                core.warning(error.message);
+        }
+    });
+}
+exports.HelmfileInit = HelmfileInit;
 
 
 /***/ }),
@@ -29763,21 +29776,34 @@ function run() {
             const helmfileWorkDirectory = core.getInput('helmfile-workdirectory');
             const helmVersion = core.getInput('helm-version');
             const helmPlugins = core.getInput('helm-plugins');
+            const helmfileAutoInit = core.getInput('helmfile-auto-init');
             core.debug(`helmfile-args: ${helmfileArgs}`);
             core.debug(`helmfile-version: ${helmfileVersion}`);
             core.debug(`helmfile-workdirectory: ${helmfileWorkDirectory}`);
             core.debug(`helm-version: ${helmVersion}`);
             core.debug(`helm-plugins: ${helmPlugins}`);
-            core.startGroup('Install helm');
-            yield Promise.all([(0, helm_1.installHelm)(helmVersion)]);
-            core.endGroup();
             core.startGroup('Install helmfile');
             yield Promise.all([(0, helmfile_1.installHelmfile)(helmfileVersion)]);
             core.endGroup();
-            if (helmPlugins.length > 0) {
-                core.startGroup('Install helm plugins');
-                yield (0, helm_1.installHelmPlugins)(helmPlugins.split(','));
-                core.endGroup();
+            switch (helmfileAutoInit) {
+                case 'false':
+                    core.startGroup('Install helm');
+                    yield Promise.all([(0, helm_1.installHelm)(helmVersion)]);
+                    core.endGroup();
+                    if (helmPlugins.length > 0) {
+                        core.startGroup('Install helm plugins');
+                        yield (0, helm_1.installHelmPlugins)(helmPlugins.split(','));
+                        core.endGroup();
+                    }
+                    break;
+                case 'true':
+                    core.startGroup('helmfile init');
+                    yield Promise.all([(0, helmfile_1.HelmfileInit)()]);
+                    core.endGroup();
+                    break;
+                default:
+                    core.setFailed(`helmfile-auto-init: ${helmfileAutoInit} is not a valid value. Valid values are 'true' or 'false'`);
+                    return;
             }
             const options = {};
             if (helmfileWorkDirectory != '') {

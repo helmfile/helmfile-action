@@ -16,6 +16,7 @@ This action works on Linux, macOS and Windows
 - `helmfile-workdirectory` : helmfile working directory. Default `"."`
 - `helm-version` : Helm version. Default `"latest"`
 - `helm-plugins` : Comma separated list of Helm plugins to install. Default `https://github.com/databus23/helm-diff`
+- `helmfile-auto-init` : Whether to run `helmfile init` before running helmfile command. Default `"false"`
 
 Example with optional inputs
 
@@ -28,6 +29,7 @@ Example with optional inputs
       https://github.com/databus23/helm-diff,
       https://github.com/jkroepke/helm-secrets
     helmfile-args: apply --environment prod
+    helmfile-auto-init: "false"
 ```
 
 ## Outputs
