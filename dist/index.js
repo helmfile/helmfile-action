@@ -29541,7 +29541,7 @@ function installHelmPlugins(plugins) {
                     ignoreReturnCode: true
                 });
                 if (result.exitCode == 1 &&
-                    result.stdout.includes('plugin already exists')) {
+                    result.stderr.includes('plugin already exists')) {
                     core.info(`Plugin ${plugin} already exists`);
                 }
                 else {
