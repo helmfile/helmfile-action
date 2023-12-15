@@ -29790,11 +29790,6 @@ function run() {
                     core.startGroup('Install helm');
                     yield Promise.all([(0, helm_1.installHelm)(helmVersion)]);
                     core.endGroup();
-                    if (helmPlugins.length > 0) {
-                        core.startGroup('Install helm plugins');
-                        yield (0, helm_1.installHelmPlugins)(helmPlugins.split(','));
-                        core.endGroup();
-                    }
                     break;
                 case 'true':
                     core.startGroup('helmfile init');
@@ -29804,6 +29799,11 @@ function run() {
                 default:
                     core.setFailed(`helmfile-auto-init: ${helmfileAutoInit} is not a valid value. Valid values are 'true' or 'false'`);
                     return;
+            }
+            if (helmPlugins.length > 0) {
+                core.startGroup('Install helm plugins');
+                yield (0, helm_1.installHelmPlugins)(helmPlugins.split(','));
+                core.endGroup();
             }
             const options = {};
             if (helmfileWorkDirectory != '') {

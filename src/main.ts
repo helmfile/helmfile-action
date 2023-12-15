@@ -27,12 +27,6 @@ async function run(): Promise<void> {
         core.startGroup('Install helm');
         await Promise.all([installHelm(helmVersion)]);
         core.endGroup();
-
-        if (helmPlugins.length > 0) {
-          core.startGroup('Install helm plugins');
-          await installHelmPlugins(helmPlugins.split(','));
-          core.endGroup();
-        }
         break;
       case 'true':
         core.startGroup('helmfile init');
@@ -44,6 +38,12 @@ async function run(): Promise<void> {
           `helmfile-auto-init: ${helmfileAutoInit} is not a valid value. Valid values are 'true' or 'false'`
         );
         return;
+    }
+
+    if (helmPlugins.length > 0) {
+      core.startGroup('Install helm plugins');
+      await installHelmPlugins(helmPlugins.split(','));
+      core.endGroup();
     }
 
     const options: exec.ExecOptions = {};
