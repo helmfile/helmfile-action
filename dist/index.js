@@ -29768,12 +29768,16 @@ function run() {
             core.debug(`helmfile-workdirectory: ${helmfileWorkDirectory}`);
             core.debug(`helm-version: ${helmVersion}`);
             core.debug(`helm-plugins: ${helmPlugins}`);
-            yield Promise.all([
-                (0, helm_1.installHelm)(helmVersion),
-                (0, helmfile_1.installHelmfile)(helmfileVersion)
-            ]);
+            core.startGroup('Install helm');
+            yield Promise.all([(0, helm_1.installHelm)(helmVersion)]);
+            core.endGroup();
+            core.startGroup('Install helmfile');
+            yield Promise.all([(0, helmfile_1.installHelmfile)(helmfileVersion)]);
+            core.endGroup();
             if (helmPlugins.length > 0) {
+                core.startGroup('Install helm plugins');
                 yield (0, helm_1.installHelmPlugins)(helmPlugins.split(','));
+                core.endGroup();
             }
             const options = {};
             if (helmfileWorkDirectory != '') {

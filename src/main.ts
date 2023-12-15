@@ -17,13 +17,18 @@ async function run(): Promise<void> {
     core.debug(`helm-version: ${helmVersion}`);
     core.debug(`helm-plugins: ${helmPlugins}`);
 
-    await Promise.all([
-      installHelm(helmVersion),
-      installHelmfile(helmfileVersion)
-    ]);
+    core.startGroup('Install helm');
+    await Promise.all([installHelm(helmVersion)]);
+    core.endGroup();
+
+    core.startGroup('Install helmfile');
+    await Promise.all([installHelmfile(helmfileVersion)]);
+    core.endGroup();
 
     if (helmPlugins.length > 0) {
+      core.startGroup('Install helm plugins');
       await installHelmPlugins(helmPlugins.split(','));
+      core.endGroup();
     }
 
     const options: exec.ExecOptions = {};
