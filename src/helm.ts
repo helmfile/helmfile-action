@@ -39,10 +39,17 @@ export async function installHelm(version: string): Promise<void> {
 export async function installHelmPlugins(plugins: string[]): Promise<void> {
   for (const plugin of plugins) {
     try {
-      const result = await getExecOutput(`helm plugin install ${plugin.trim()}`, [], {
-        ignoreReturnCode: true
-      });
-      if (result.exitCode == 1 && result.stdout.includes('plugin already exists')) {
+      const result = await getExecOutput(
+        `helm plugin install ${plugin.trim()}`,
+        [],
+        {
+          ignoreReturnCode: true
+        }
+      );
+      if (
+        result.exitCode == 1 &&
+        result.stdout.includes('plugin already exists')
+      ) {
         core.info(`Plugin ${plugin} already exists`);
       } else {
         throw new Error(result.stderr);

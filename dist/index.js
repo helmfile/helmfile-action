@@ -29537,7 +29537,16 @@ function installHelmPlugins(plugins) {
     return __awaiter(this, void 0, void 0, function* () {
         for (const plugin of plugins) {
             try {
-                yield (0, exec_1.exec)(`helm plugin install ${plugin.trim()}`);
+                const result = yield (0, exec_1.getExecOutput)(`helm plugin install ${plugin.trim()}`, [], {
+                    ignoreReturnCode: true
+                });
+                if (result.exitCode == 1 &&
+                    result.stdout.includes('plugin already exists')) {
+                    core.info(`Plugin ${plugin} already exists`);
+                }
+                else {
+                    throw new Error(result.stderr);
+                }
                 yield (0, exec_1.exec)('helm plugin list');
             }
             catch (error) {
