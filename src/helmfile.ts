@@ -1,4 +1,5 @@
 import * as core from '@actions/core';
+import {exec} from '@actions/exec';
 import {
   arch,
   cacheDir,
@@ -28,4 +29,12 @@ export async function installHelmfile(version: string): Promise<void> {
   const extractedPath = await extract(downloadPath);
   toolPath = await cacheDir(extractedPath, 'helmfile', version);
   core.addPath(toolPath);
+}
+
+export async function HelmfileInit(): Promise<void> {
+  try {
+    await exec('helmfile init --force');
+  } catch (error) {
+    if (error instanceof Error) core.warning(error.message);
+  }
 }

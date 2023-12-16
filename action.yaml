@@ -5,6 +5,10 @@ inputs:
   helmfile-args:
     required: true
     description: 'Helmfile arguments'
+  helmfile-auto-init:
+    required: false
+    description: 'Automatically initialize helmfile'
+    default: 'false'
   helmfile-version:
     required: false
     description: 'Helmfile version'
