@@ -29536,23 +29536,23 @@ exports.installHelm = installHelm;
 function installHelmPlugins(plugins) {
     return __awaiter(this, void 0, void 0, function* () {
         for (const plugin of plugins) {
-            try {
-                const result = yield (0, exec_1.getExecOutput)(`helm plugin install ${plugin.trim()}`, [], {
-                    ignoreReturnCode: true
-                });
-                if (result.exitCode == 1 &&
-                    result.stderr.includes('plugin already exists')) {
-                    core.info(`Plugin ${plugin} already exists`);
+            let pluginStderr = '';
+            const options = {};
+            options.ignoreReturnCode = true;
+            options.listeners = {
+                stderr: (data) => {
+                    pluginStderr += data.toString();
                 }
-                else {
-                    throw new Error(result.stderr);
-                }
-                yield (0, exec_1.exec)('helm plugin list');
+            };
+            const result = yield (0, exec_1.getExecOutput)(`helm plugin install ${plugin.trim()}`, [], options);
+            if (result.exitCode == 1 &&
+                pluginStderr.includes('plugin already exists')) {
+                core.info(`Plugin ${plugin} already exists`);
             }
-            catch (error) {
-                if (error instanceof Error)
-                    core.warning(error.message);
+            else {
+                throw new Error(result.stderr);
             }
+            yield (0, exec_1.exec)('helm plugin list');
         }
     });
 }
