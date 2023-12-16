@@ -55,7 +55,7 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
 
     if (eCode == 0) {
       core.info(`Plugin ${plugin} installed successfully`);
-      break;
+      continue;
     }
 
     if (eCode == 1 && pluginStderr.includes('plugin already exists')) {
