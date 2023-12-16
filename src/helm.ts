@@ -53,6 +53,7 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
       options
     );
 
+    core.info(`Plugin ${plugin} installation exited with code ${eCode}`);
     if (eCode == 0) {
       core.info(`Plugin ${plugin} installed successfully`);
       continue;

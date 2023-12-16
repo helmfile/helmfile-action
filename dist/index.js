@@ -29545,9 +29545,10 @@ function installHelmPlugins(plugins) {
                 }
             };
             const eCode = yield (0, exec_1.exec)(`helm plugin install ${plugin.trim()}`, [], options);
+            core.info(`Plugin ${plugin} installation exited with code ${eCode}`);
             if (eCode == 0) {
                 core.info(`Plugin ${plugin} installed successfully`);
-                break;
+                continue;
             }
             if (eCode == 1 && pluginStderr.includes('plugin already exists')) {
                 core.info(`Plugin ${plugin} already exists`);
