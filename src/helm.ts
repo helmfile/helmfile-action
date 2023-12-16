@@ -64,5 +64,6 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
       throw new Error(pluginStderr);
     }
   }
+
   await exec('helm plugin list');
 }
