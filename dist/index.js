@@ -29545,16 +29545,18 @@ function installHelmPlugins(plugins) {
                 }
             };
             const eCode = yield (0, exec_1.exec)(`helm plugin install ${plugin.trim()}`, [], options);
-            core.info(`eCode: ${eCode}`);
-            core.info(`pluginStderr: ${pluginStderr}`);
+            if (eCode == 0) {
+                core.info(`Plugin ${plugin} installed successfully`);
+                break;
+            }
             if (eCode == 1 && pluginStderr.includes('plugin already exists')) {
                 core.info(`Plugin ${plugin} already exists`);
             }
             else {
                 throw new Error(pluginStderr);
             }
-            yield (0, exec_1.exec)('helm plugin list');
         }
+        yield (0, exec_1.exec)('helm plugin list');
     });
 }
 exports.installHelmPlugins = installHelmPlugins;

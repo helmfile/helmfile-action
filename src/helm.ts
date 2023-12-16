@@ -52,13 +52,17 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
       [],
       options
     );
-    core.info(`eCode: ${eCode}`);
-    core.info(`pluginStderr: ${pluginStderr}`);
+
+    if (eCode == 0) {
+      core.info(`Plugin ${plugin} installed successfully`);
+      break;
+    }
+
     if (eCode == 1 && pluginStderr.includes('plugin already exists')) {
       core.info(`Plugin ${plugin} already exists`);
     } else {
       throw new Error(pluginStderr);
     }
-    await exec('helm plugin list');
   }
+  await exec('helm plugin list');
 }
