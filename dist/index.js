@@ -29544,13 +29544,14 @@ function installHelmPlugins(plugins) {
                     pluginStderr += data.toString();
                 }
             };
-            const result = yield (0, exec_1.getExecOutput)(`helm plugin install ${plugin.trim()}`, [], options);
-            if (result.exitCode == 1 &&
-                pluginStderr.includes('plugin already exists')) {
+            const eCode = yield (0, exec_1.exec)(`helm plugin install ${plugin.trim()}`, [], options);
+            core.info(`eCode: ${eCode}`);
+            core.info(`pluginStderr: ${pluginStderr}`);
+            if (eCode == 1 && pluginStderr.includes('plugin already exists')) {
                 core.info(`Plugin ${plugin} already exists`);
             }
             else {
-                throw new Error(result.stderr);
+                throw new Error(pluginStderr);
             }
             yield (0, exec_1.exec)('helm plugin list');
         }
