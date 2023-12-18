@@ -33,5 +33,5 @@ outputs:
   helmfile-stderr:
     description: 'Error output of helmfile command'
 runs:
-  using: 'node16'
+  using: 'node20'
   main: 'dist/index.js'
