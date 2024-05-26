@@ -2,7 +2,7 @@ import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import {installHelm, installHelmPlugins} from './helm';
 import {installHelmfile, HelmfileInit} from './helmfile';
-import fs from  'fs';
+import fs from 'fs';
 
 async function run(): Promise<void> {
   try {
@@ -12,7 +12,9 @@ async function run(): Promise<void> {
     const helmVersion = core.getInput('helm-version');
     const helmPlugins = core.getInput('helm-plugins');
     const helmfileAutoInit = core.getInput('helmfile-auto-init');
-    const helmfileKubeconfigContext = core.getInput('helmfile-kubeconfig-context');
+    const helmfileKubeconfigContext = core.getInput(
+      'helmfile-kubeconfig-context'
+    );
 
     core.debug(`helmfile-args: ${helmfileArgs}`);
     core.debug(`helmfile-version: ${helmfileVersion}`);
@@ -61,17 +63,22 @@ async function run(): Promise<void> {
           `The process 'mkdir -p ~/.kube' failed with exit code ${mkdirExitcode}`
         );
       }
-      
+
       // write helmfileKubeconfigContext to the ~/.kube/config file
       const helmfileKubeconfigContextFile = `${process.env.HOME}/.kube/config`;
-      fs.writeFile(helmfileKubeconfigContextFile, helmfileKubeconfigContext, (err) => {
-        if (err) {
-          throw new Error(`Failed to write helmfile-kubeconfig-context to ${helmfileKubeconfigContextFile}`);
+      fs.writeFile(
+        helmfileKubeconfigContextFile,
+        helmfileKubeconfigContext,
+        err => {
+          if (err) {
+            throw new Error(
+              `Failed to write helmfile-kubeconfig-context to ${helmfileKubeconfigContextFile}`
+            );
+          }
         }
-      });
+      );
       core.endGroup();
     }
-
 
     const options: exec.ExecOptions = {};
     if (helmfileWorkDirectory != '') {
