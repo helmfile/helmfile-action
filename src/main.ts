@@ -2,6 +2,7 @@ import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import {installHelm, installHelmPlugins} from './helm';
 import {installHelmfile, HelmfileInit} from './helmfile';
+import fs from 'fs';
 
 async function run(): Promise<void> {
   try {
@@ -11,12 +12,16 @@ async function run(): Promise<void> {
     const helmVersion = core.getInput('helm-version');
     const helmPlugins = core.getInput('helm-plugins');
     const helmfileAutoInit = core.getInput('helmfile-auto-init');
+    const helmfileKubeconfigContext = core.getInput(
+      'helmfile-kubeconfig-context'
+    );
 
     core.debug(`helmfile-args: ${helmfileArgs}`);
     core.debug(`helmfile-version: ${helmfileVersion}`);
     core.debug(`helmfile-workdirectory: ${helmfileWorkDirectory}`);
     core.debug(`helm-version: ${helmVersion}`);
     core.debug(`helm-plugins: ${helmPlugins}`);
+    core.debug(`helmfile-auto-init: ${helmfileAutoInit}`);
 
     core.startGroup('Install helmfile');
     await Promise.all([installHelmfile(helmfileVersion)]);
@@ -43,6 +48,35 @@ async function run(): Promise<void> {
     if (helmPlugins.length > 0) {
       core.startGroup('Install helm plugins');
       await installHelmPlugins(helmPlugins.split(','));
+      core.endGroup();
+    }
+
+    // Add support for helmfile-kubeconfig-context
+    if (helmfileKubeconfigContext.length > 0) {
+      core.startGroup('Set helmfile-kubeconfig-context');
+      // make sure the kubeconfig dir exists
+      const mkdirExitcode = await exec.exec('mkdir -p ~/.kube', [], {
+        ignoreReturnCode: true
+      });
+      if (mkdirExitcode !== 0) {
+        throw new Error(
+          `The process 'mkdir -p ~/.kube' failed with exit code ${mkdirExitcode}`
+        );
+      }
+
+      // write helmfileKubeconfigContext to the ~/.kube/config file
+      const helmfileKubeconfigContextFile = `${process.env.HOME}/.kube/config`;
+      fs.writeFile(
+        helmfileKubeconfigContextFile,
+        helmfileKubeconfigContext,
+        err => {
+          if (err) {
+            throw new Error(
+              `Failed to write helmfile-kubeconfig-context to ${helmfileKubeconfigContextFile}`
+            );
+          }
+        }
+      );
       core.endGroup();
     }
 

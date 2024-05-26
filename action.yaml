@@ -25,6 +25,10 @@ inputs:
     required: false
     description: 'Comma separated list of Helm plugins to install'
     default: 'https://github.com/databus23/helm-diff'
+  helmfile-kubeconfig-context:
+    required: false
+    description: 'kubeconfig context, it not empty, it will be written to the kubeconfig file'
+    default: ''
 outputs:
   exit-code:
     description: 'Exit code of helmfile. Useful to handle diff --detailed-exitcode'
