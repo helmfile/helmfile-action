@@ -17,7 +17,7 @@ This action works on Linux, macOS and Windows
 - `helm-version` : Helm version. Default `"latest"`
 - `helm-plugins` : Comma separated list of Helm plugins to install. Default `https://github.com/databus23/helm-diff`
 - `helmfile-auto-init` : Whether to run `helmfile init` before running helmfile command. Default `"false"`
-- `helmfile-kubeconfig-content` : Kubeconfig content. Default `""`, if not empty, it will be written to `$HOME/.kube/config`
+- `helmfile-kubeconfig-context` : Kubeconfig content. Default `""`, if not empty, it will be written to `$HOME/.kube/config`
 
 Example with optional inputs
 
