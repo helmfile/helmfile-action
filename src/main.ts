@@ -99,6 +99,12 @@ async function run(): Promise<void> {
 
     options.ignoreReturnCode = true;
 
+    // set HELM_DIFF_COLOR=true into the environment
+    options.env = {
+      ...process.env,
+      HELM_DIFF_COLOR: 'true'
+    };
+
     const processExitCode = await exec.exec(
       `helmfile ${helmfileArgs}`,
       [],
