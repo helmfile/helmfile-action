@@ -1,7 +1,7 @@
 import * as core from '@actions/core';
 import * as exec from '@actions/exec';
-import { installHelm, installHelmPlugins } from './helm';
-import { installHelmfile, HelmfileInit } from './helmfile';
+import {installHelm, installHelmPlugins} from './helm';
+import {installHelmfile, HelmfileInit} from './helmfile';
 import fs from 'fs';
 
 async function run(): Promise<void> {
@@ -103,7 +103,7 @@ async function run(): Promise<void> {
     options.env = {
       ...process.env,
       HELM_DIFF_COLOR: 'true'
-    }
+    };
 
     const processExitCode = await exec.exec(
       `helmfile ${helmfileArgs}`,
