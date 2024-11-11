@@ -29,6 +29,10 @@ inputs:
     required: false
     description: 'kubeconfig context, it not empty, it will be written to the kubeconfig file'
     default: ''
+  helm-diff-color:
+    required: false
+    description: 'Enable helm diff plugin color output'
+    default: 'true'
 outputs:
   exit-code:
     description: 'Exit code of helmfile. Useful to handle diff --detailed-exitcode'
