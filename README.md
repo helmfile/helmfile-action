@@ -18,6 +18,7 @@ This action works on Linux, macOS and Windows
 - `helm-plugins` : Comma separated list of Helm plugins to install. Default `https://github.com/databus23/helm-diff`
 - `helmfile-auto-init` : Whether to run `helmfile init` before running helmfile command. Default `"false"`
 - `helmfile-kubeconfig-context` : Kubeconfig context. Default `""`, if not empty, it will be written to `$HOME/.kube/config`
+- `helm-diff-color`: Enable helm diff plugin color output. Default `"true"`.
 
 Example with optional inputs
 
