@@ -23,7 +23,6 @@ async function run(): Promise<void> {
     core.debug(`helm-version: ${helmVersion}`);
     core.debug(`helm-plugins: ${helmPlugins}`);
     core.debug(`helmfile-auto-init: ${helmfileAutoInit}`);
-    core.debug(`helmfile-auto-init: ${helmfileAutoInit}`);
     core.debug(`helm-diff-color: ${helmDiffColor}`);
 
     core.startGroup('Install helmfile');
