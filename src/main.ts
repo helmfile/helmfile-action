@@ -15,6 +15,7 @@ async function run(): Promise<void> {
     const helmfileKubeconfigContext = core.getInput(
       'helmfile-kubeconfig-context'
     );
+    const helmDiffColor = core.getInput('helm-diff-color');
 
     core.debug(`helmfile-args: ${helmfileArgs}`);
     core.debug(`helmfile-version: ${helmfileVersion}`);
@@ -22,6 +23,8 @@ async function run(): Promise<void> {
     core.debug(`helm-version: ${helmVersion}`);
     core.debug(`helm-plugins: ${helmPlugins}`);
     core.debug(`helmfile-auto-init: ${helmfileAutoInit}`);
+    core.debug(`helmfile-auto-init: ${helmfileAutoInit}`);
+    core.debug(`helm-diff-color: ${helmDiffColor}`);
 
     core.startGroup('Install helmfile');
     await Promise.all([installHelmfile(helmfileVersion)]);
@@ -99,10 +102,10 @@ async function run(): Promise<void> {
 
     options.ignoreReturnCode = true;
 
-    // set HELM_DIFF_COLOR=true into the environment
+    // set HELM_DIFF_COLOR=true into the helmfile command's environment
     options.env = {
-      ...process.env,
-      HELM_DIFF_COLOR: 'true'
+      HELM_DIFF_COLOR: helmDiffColor,
+      ...process.env
     };
 
     const processExitCode = await exec.exec(
