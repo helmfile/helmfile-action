@@ -30012,12 +30012,14 @@ function run() {
             const helmPlugins = core.getInput('helm-plugins');
             const helmfileAutoInit = core.getInput('helmfile-auto-init');
             const helmfileKubeconfigContext = core.getInput('helmfile-kubeconfig-context');
+            const helmDiffColor = core.getInput('helm-diff-color');
             core.debug(`helmfile-args: ${helmfileArgs}`);
             core.debug(`helmfile-version: ${helmfileVersion}`);
             core.debug(`helmfile-workdirectory: ${helmfileWorkDirectory}`);
             core.debug(`helm-version: ${helmVersion}`);
             core.debug(`helm-plugins: ${helmPlugins}`);
             core.debug(`helmfile-auto-init: ${helmfileAutoInit}`);
+            core.debug(`helm-diff-color: ${helmDiffColor}`);
             core.startGroup('Install helmfile');
             yield Promise.all([(0, helmfile_1.installHelmfile)(helmfileVersion)]);
             core.endGroup();
@@ -30075,8 +30077,8 @@ function run() {
                 }
             };
             options.ignoreReturnCode = true;
-            // set HELM_DIFF_COLOR=true into the environment
-            options.env = Object.assign(Object.assign({}, process.env), { HELM_DIFF_COLOR: 'true' });
+            // set HELM_DIFF_COLOR=true into the helmfile command's environment
+            options.env = Object.assign({ HELM_DIFF_COLOR: helmDiffColor }, process.env);
             const processExitCode = yield exec.exec(`helmfile ${helmfileArgs}`, [], options);
             core.setOutput('exit-code', processExitCode);
             core.setOutput('helmfile-stdout', helmfileStdout);
