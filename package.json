@@ -1,6 +1,6 @@
 {
   "name": "helmfile-action",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "private": true,
   "description": "Helmfile setup action",
   "main": "src/main.ts",
