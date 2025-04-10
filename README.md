@@ -5,7 +5,7 @@ Setup [Helmfile](https://github.com/helmfile/helmfile) and [Helm](https://github
 This action works on Linux, macOS and Windows
 
 ```yaml
-- uses: helmfile/helmfile-action@v1.0.0
+- uses: helmfile/helmfile-action@v2.0.4
   with:
     helmfile-args: apply
 ```
@@ -23,7 +23,7 @@ This action works on Linux, macOS and Windows
 Example with optional inputs
 
 ```yaml
-- uses: helmfile/helmfile-action@v1.0.0
+- uses: helmfile/helmfile-action@v2.0.4
   with:
     helmfile-version: 'v0.150.0'
     helm-version: 'v3.11.0'
