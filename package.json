@@ -11,7 +11,7 @@
     "lint": "eslint --config ./.eslintrc.js \"**/*.ts\"",
     "lint:fix": "eslint --config ./.eslintrc.js \"**/*.ts\" --fix",
     "package": "ncc build --source-map --license licenses.txt",
-    "test": "echo 'No tests yet'",
+    "test": "jest",
     "all": "npm run build && npm run format && npm run lint && npm run package"
   },
   "repository": {
@@ -32,6 +32,7 @@
     "@actions/tool-cache": "^2.0.2"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^24.2.1",
     "@typescript-eslint/eslint-plugin": "^8.32.1",
     "@vercel/ncc": "^0.38.3",
@@ -40,6 +41,7 @@
     "eslint-plugin-jest": "^29.0.1",
     "jest": "^30.0.5",
     "prettier": "^3.6.2",
+    "ts-jest": "^29.4.1",
     "typescript": "^5.8.3"
   }
 }
