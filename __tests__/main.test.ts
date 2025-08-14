@@ -74,4 +74,30 @@ Some real error message`;
     const expected = 'Some real error message';
     expect(filterInformationalMessages(stderr)).toBe(expected);
   });
+
+  test('should not filter error messages containing "Building dependency" in the middle', () => {
+    const stderr = 'Error while Building dependency: chart not found';
+    const expected = 'Error while Building dependency: chart not found';
+    expect(filterInformationalMessages(stderr)).toBe(expected);
+  });
+
+  test('should handle case sensitivity correctly', () => {
+    const stderr = `building dependency release=app1, chart=app1
+Building Dependency release=app2, chart=app2
+Building dependency release=app3, chart=app3
+Error: something failed`;
+    const expected = 'building dependency release=app1, chart=app1\nBuilding Dependency release=app2, chart=app2\nError: something failed';
+    expect(filterInformationalMessages(stderr)).toBe(expected);
+  });
+
+  test('should handle empty lines and preserve structure', () => {
+    const stderr = `Building dependency release=app1, chart=app1
+
+Error: something failed
+
+Building dependency release=app2, chart=app2
+Warning: deprecated`;
+    const expected = 'Error: something failed\n\nWarning: deprecated';
+    expect(filterInformationalMessages(stderr)).toBe(expected);
+  });
 });
