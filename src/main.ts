@@ -2,6 +2,7 @@ import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import {installHelm, installHelmPlugins} from './helm';
 import {installHelmfile, HelmfileInit} from './helmfile';
+import {parseArgs} from './helpers';
 import fs from 'fs';
 
 async function run(): Promise<void> {
@@ -108,8 +109,8 @@ async function run(): Promise<void> {
     };
 
     const processExitCode = await exec.exec(
-      `helmfile ${helmfileArgs}`,
-      [],
+      'helmfile',
+      parseArgs(helmfileArgs),
       options
     );
 

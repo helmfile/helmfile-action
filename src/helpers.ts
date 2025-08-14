@@ -49,3 +49,63 @@ export async function cacheDir(
 ): Promise<string> {
   return await tc.cacheDir(path, tool, version);
 }
+
+/**
+ * Parse command line arguments string into an array of arguments.
+ * Handles quoted arguments properly to avoid shell interpretation issues.
+ * @param argsString - The command line arguments as a string
+ * @returns Array of parsed arguments
+ */
+export function parseArgs(argsString: string): string[] {
+  if (!argsString.trim()) {
+    return [];
+  }
+
+  const args: string[] = [];
+  let currentArg = '';
+  let inQuotes = false;
+  let quoteChar = '';
+  let escaped = false;
+
+  for (let i = 0; i < argsString.length; i++) {
+    const char = argsString[i];
+
+    if (escaped) {
+      currentArg += char;
+      escaped = false;
+      continue;
+    }
+
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+
+    if (inQuotes) {
+      if (char === quoteChar) {
+        inQuotes = false;
+        quoteChar = '';
+      } else {
+        currentArg += char;
+      }
+    } else {
+      if (char === '"' || char === "'") {
+        inQuotes = true;
+        quoteChar = char;
+      } else if (char === ' ' || char === '\t') {
+        if (currentArg) {
+          args.push(currentArg);
+          currentArg = '';
+        }
+      } else {
+        currentArg += char;
+      }
+    }
+  }
+
+  if (currentArg) {
+    args.push(currentArg);
+  }
+
+  return args;
+}

@@ -29869,6 +29869,7 @@ exports.extract = extract;
 exports.resloveCached = resloveCached;
 exports.resolveLatest = resolveLatest;
 exports.cacheDir = cacheDir;
+exports.parseArgs = parseArgs;
 const http = __importStar(__nccwpck_require__(4844));
 const tc = __importStar(__nccwpck_require__(3472));
 const os_1 = __importDefault(__nccwpck_require__(857));
@@ -29911,6 +29912,62 @@ function cacheDir(path, tool, version) {
     return __awaiter(this, void 0, void 0, function* () {
         return yield tc.cacheDir(path, tool, version);
     });
+}
+/**
+ * Parse command line arguments string into an array of arguments.
+ * Handles quoted arguments properly to avoid shell interpretation issues.
+ * @param argsString - The command line arguments as a string
+ * @returns Array of parsed arguments
+ */
+function parseArgs(argsString) {
+    if (!argsString.trim()) {
+        return [];
+    }
+    const args = [];
+    let currentArg = '';
+    let inQuotes = false;
+    let quoteChar = '';
+    let escaped = false;
+    for (let i = 0; i < argsString.length; i++) {
+        const char = argsString[i];
+        if (escaped) {
+            currentArg += char;
+            escaped = false;
+            continue;
+        }
+        if (char === '\\') {
+            escaped = true;
+            continue;
+        }
+        if (inQuotes) {
+            if (char === quoteChar) {
+                inQuotes = false;
+                quoteChar = '';
+            }
+            else {
+                currentArg += char;
+            }
+        }
+        else {
+            if (char === '"' || char === "'") {
+                inQuotes = true;
+                quoteChar = char;
+            }
+            else if (char === ' ' || char === '\t') {
+                if (currentArg) {
+                    args.push(currentArg);
+                    currentArg = '';
+                }
+            }
+            else {
+                currentArg += char;
+            }
+        }
+    }
+    if (currentArg) {
+        args.push(currentArg);
+    }
+    return args;
 }
 
 
@@ -29971,6 +30028,7 @@ const core = __importStar(__nccwpck_require__(7484));
 const exec = __importStar(__nccwpck_require__(5236));
 const helm_1 = __nccwpck_require__(9031);
 const helmfile_1 = __nccwpck_require__(841);
+const helpers_1 = __nccwpck_require__(1302);
 const fs_1 = __importDefault(__nccwpck_require__(9896));
 function run() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -30049,7 +30107,7 @@ function run() {
             options.ignoreReturnCode = true;
             // set HELM_DIFF_COLOR=true into the helmfile command's environment
             options.env = Object.assign({ HELM_DIFF_COLOR: helmDiffColor }, process.env);
-            const processExitCode = yield exec.exec(`helmfile ${helmfileArgs}`, [], options);
+            const processExitCode = yield exec.exec('helmfile', (0, helpers_1.parseArgs)(helmfileArgs), options);
             core.setOutput('exit-code', processExitCode);
             core.setOutput('helmfile-stdout', helmfileStdout);
             core.setOutput('helmfile-stderr', helmfileStderr);
