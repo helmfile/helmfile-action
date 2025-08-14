@@ -4,6 +4,32 @@ import {installHelm, installHelmPlugins} from './helm';
 import {installHelmfile, HelmfileInit} from './helmfile';
 import fs from 'fs';
 
+/**
+ * Filter out informational messages from stderr that are not actual errors
+ * @param stderr The stderr output from helmfile
+ * @returns Filtered stderr containing only actual error messages
+ */
+function filterInformationalMessages(stderr: string): string {
+  if (!stderr) {
+    return '';
+  }
+
+  const lines = stderr.split('\n');
+  const filteredLines = lines.filter(line => {
+    const trimmedLine = line.trim();
+    
+    // Filter out informational messages that are not errors
+    if (trimmedLine.startsWith('Building dependency')) {
+      return false;
+    }
+    
+    // Keep the line if it doesn't match any informational patterns
+    return true;
+  });
+
+  return filteredLines.join('\n').trim();
+}
+
 async function run(): Promise<void> {
   try {
     const helmfileArgs = core.getInput('helmfile-args');
@@ -115,7 +141,7 @@ async function run(): Promise<void> {
 
     core.setOutput('exit-code', processExitCode);
     core.setOutput('helmfile-stdout', helmfileStdout);
-    core.setOutput('helmfile-stderr', helmfileStderr);
+    core.setOutput('helmfile-stderr', filterInformationalMessages(helmfileStderr));
 
     if (processExitCode !== 0 && processExitCode !== 2) {
       throw new Error(

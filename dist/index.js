@@ -29972,6 +29972,27 @@ const exec = __importStar(__nccwpck_require__(5236));
 const helm_1 = __nccwpck_require__(9031);
 const helmfile_1 = __nccwpck_require__(841);
 const fs_1 = __importDefault(__nccwpck_require__(9896));
+/**
+ * Filter out informational messages from stderr that are not actual errors
+ * @param stderr The stderr output from helmfile
+ * @returns Filtered stderr containing only actual error messages
+ */
+function filterInformationalMessages(stderr) {
+    if (!stderr) {
+        return '';
+    }
+    const lines = stderr.split('\n');
+    const filteredLines = lines.filter(line => {
+        const trimmedLine = line.trim();
+        // Filter out informational messages that are not errors
+        if (trimmedLine.startsWith('Building dependency')) {
+            return false;
+        }
+        // Keep the line if it doesn't match any informational patterns
+        return true;
+    });
+    return filteredLines.join('\n').trim();
+}
 function run() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
@@ -30052,7 +30073,7 @@ function run() {
             const processExitCode = yield exec.exec(`helmfile ${helmfileArgs}`, [], options);
             core.setOutput('exit-code', processExitCode);
             core.setOutput('helmfile-stdout', helmfileStdout);
-            core.setOutput('helmfile-stderr', helmfileStderr);
+            core.setOutput('helmfile-stderr', filterInformationalMessages(helmfileStderr));
             if (processExitCode !== 0 && processExitCode !== 2) {
                 throw new Error(`The process 'helmfile ${helmfileArgs}' failed with exit code ${processExitCode}`);
             }
