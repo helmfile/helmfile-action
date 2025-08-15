@@ -29696,6 +29696,19 @@ function installHelm(version) {
 function installHelmPlugins(plugins) {
     return __awaiter(this, void 0, void 0, function* () {
         for (const plugin of plugins) {
+            const pluginSpec = plugin.trim();
+            let pluginUrl = pluginSpec;
+            let version = '';
+            // Parse plugin specification for version (format: url@version)
+            const atIndex = pluginSpec.lastIndexOf('@');
+            if (atIndex > 0) {
+                const potentialVersion = pluginSpec.substring(atIndex + 1);
+                // Check if the part after @ looks like a version (starts with v or is numeric)
+                if (potentialVersion.match(/^v?\d+/)) {
+                    pluginUrl = pluginSpec.substring(0, atIndex);
+                    version = potentialVersion;
+                }
+            }
             let pluginStderr = '';
             const options = {};
             options.ignoreReturnCode = true;
@@ -29704,13 +29717,20 @@ function installHelmPlugins(plugins) {
                     pluginStderr += data.toString();
                 }
             };
-            const eCode = yield (0, exec_1.exec)(`helm plugin install ${plugin.trim()}`, [], options);
+            // Build the helm plugin install command
+            let installCommand = `helm plugin install ${pluginUrl}`;
+            if (version) {
+                installCommand += ` --version ${version}`;
+            }
+            const eCode = yield (0, exec_1.exec)(installCommand, [], options);
             if (eCode == 0) {
-                core.info(`Plugin ${plugin} installed successfully`);
+                const versionInfo = version ? ` (version ${version})` : '';
+                core.info(`Plugin ${pluginUrl}${versionInfo} installed successfully`);
                 continue;
             }
             if (eCode == 1 && pluginStderr.includes('plugin already exists')) {
-                core.info(`Plugin ${plugin} already exists`);
+                const versionInfo = version ? ` (version ${version})` : '';
+                core.info(`Plugin ${pluginUrl}${versionInfo} already exists`);
             }
             else {
                 throw new Error(pluginStderr);
