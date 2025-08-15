@@ -16,12 +16,12 @@ function filterInformationalMessages(stderr: string): string {
   const lines = stderr.split('\n');
   const filteredLines = lines.filter(line => {
     const trimmedLine = line.trim();
-    
+
     // Filter out informational messages that are not errors
     if (trimmedLine.startsWith('Building dependency')) {
       return false;
     }
-    
+
     // Keep the line if it doesn't match any informational patterns
     return true;
   });
@@ -35,13 +35,15 @@ describe('filterInformationalMessages', () => {
   });
 
   test('should filter out "Building dependency" messages', () => {
-    const stderr = 'Building dependency release=secret-creator, chart=secret-creator\nSome other line';
+    const stderr =
+      'Building dependency release=secret-creator, chart=secret-creator\nSome other line';
     const expected = 'Some other line';
     expect(filterInformationalMessages(stderr)).toBe(expected);
   });
 
   test('should keep actual error messages', () => {
-    const stderr = 'Error: chart not found\nBuilding dependency release=test, chart=test\nFatal: connection failed';
+    const stderr =
+      'Error: chart not found\nBuilding dependency release=test, chart=test\nFatal: connection failed';
     const expected = 'Error: chart not found\nFatal: connection failed';
     expect(filterInformationalMessages(stderr)).toBe(expected);
   });
@@ -51,7 +53,8 @@ describe('filterInformationalMessages', () => {
 Error: failed to render template
 Building dependency release=app2, chart=app2
 Warning: deprecated API version`;
-    const expected = 'Error: failed to render template\nWarning: deprecated API version';
+    const expected =
+      'Error: failed to render template\nWarning: deprecated API version';
     expect(filterInformationalMessages(stderr)).toBe(expected);
   });
 
@@ -62,7 +65,8 @@ Building dependency release=app2, chart=app2`;
   });
 
   test('should preserve whitespace in non-filtered lines', () => {
-    const stderr = '  Error: something failed  \nBuilding dependency release=test, chart=test\n  Warning: deprecated  ';
+    const stderr =
+      '  Error: something failed  \nBuilding dependency release=test, chart=test\n  Warning: deprecated  ';
     const expected = 'Error: something failed  \n  Warning: deprecated';
     expect(filterInformationalMessages(stderr)).toBe(expected);
   });
@@ -86,7 +90,8 @@ Some real error message`;
 Building Dependency release=app2, chart=app2
 Building dependency release=app3, chart=app3
 Error: something failed`;
-    const expected = 'building dependency release=app1, chart=app1\nBuilding Dependency release=app2, chart=app2\nError: something failed';
+    const expected =
+      'building dependency release=app1, chart=app1\nBuilding Dependency release=app2, chart=app2\nError: something failed';
     expect(filterInformationalMessages(stderr)).toBe(expected);
   });
 
