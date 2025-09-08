@@ -23,7 +23,7 @@ This action works on Linux, macOS and Windows
 Example with optional inputs
 
 ```yaml
-- uses: helmfile/helmfile-action@v2.0.4
+- uses: helmfile/helmfile-action@v2.0.5
   with:
     helmfile-version: 'v0.150.0'
     helm-version: 'v3.11.0'
