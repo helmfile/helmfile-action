@@ -41,11 +41,11 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v5
-      - run: helm version
       - uses: ./
         with:
           helmfile-auto-init: 'true'
           helm-plugins: >
+            helm-version: 'v4.0.0'
             https://github.com/databus23/helm-diff,
             https://github.com/jkroepke/helm-secrets
         env:
