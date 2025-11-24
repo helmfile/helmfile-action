@@ -44,8 +44,8 @@ jobs:
       - uses: ./
         with:
           helmfile-auto-init: 'true'
+          helm-version: 'v4.0.0'
           helm-plugins: >
-            helm-version: 'v4.0.0'
             https://github.com/databus23/helm-diff,
             https://github.com/jkroepke/helm-secrets
         env:
