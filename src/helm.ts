@@ -64,7 +64,7 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
     };
 
     // Build the helm plugin install command
-    let installCommand = `helm plugin install ${pluginUrl}`;
+    let installCommand = `helm plugin install --verify=false ${pluginUrl}`;
     if (version) {
       installCommand += ` --version ${version}`;
     }
