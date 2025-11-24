@@ -20,7 +20,7 @@ describe('installHelmPlugins', () => {
     await installHelmPlugins(['https://github.com/databus23/helm-diff']);
 
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install https://github.com/databus23/helm-diff',
+      'helm plugin install --verify https://github.com/databus23/helm-diff',
       [],
       expect.any(Object)
     );
@@ -35,7 +35,7 @@ describe('installHelmPlugins', () => {
     await installHelmPlugins(['https://github.com/databus23/helm-diff@v3.1.3']);
 
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install https://github.com/databus23/helm-diff --version v3.1.3',
+      'helm plugin install --verify https://github.com/databus23/helm-diff --version v3.1.3',
       [],
       expect.any(Object)
     );
@@ -50,7 +50,7 @@ describe('installHelmPlugins', () => {
     await installHelmPlugins(['https://github.com/databus23/helm-diff@3.1.3']);
 
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install https://github.com/databus23/helm-diff --version 3.1.3',
+      'helm plugin install --verify https://github.com/databus23/helm-diff --version 3.1.3',
       [],
       expect.any(Object)
     );
@@ -90,7 +90,7 @@ describe('installHelmPlugins', () => {
     await installHelmPlugins(['https://github.com/user@domain.com/plugin']);
 
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install https://github.com/user@domain.com/plugin',
+      'helm plugin install --verify https://github.com/user@domain.com/plugin',
       [],
       expect.any(Object)
     );
@@ -106,17 +106,17 @@ describe('installHelmPlugins', () => {
     ]);
 
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install https://github.com/databus23/helm-diff --version v3.1.3',
+      'helm plugin install --verify https://github.com/databus23/helm-diff --version v3.1.3',
       [],
       expect.any(Object)
     );
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install https://github.com/jkroepke/helm-secrets',
+      'helm plugin install --verify https://github.com/jkroepke/helm-secrets',
       [],
       expect.any(Object)
     );
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install https://github.com/chartmuseum/helm-push --version v0.10.1',
+      'helm plugin install --verify https://github.com/chartmuseum/helm-push --version v0.10.1',
       [],
       expect.any(Object)
     );
