@@ -133,7 +133,7 @@ describe('installHelmPlugins', () => {
 
   it('should not add --verify=false flag for Helm v3', async () => {
     // Override mock to return Helm v3 version
-    mockGetExecOutput.mockResolvedValue({
+    mockGetExecOutput.mockResolvedValueOnce({
       exitCode: 0,
       stdout: 'v3.15.0+gc2a00e1',
       stderr: ''
