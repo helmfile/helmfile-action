@@ -1,5 +1,5 @@
 import * as core from '@actions/core';
-import {exec, ExecOptions} from '@actions/exec';
+import {exec, ExecOptions, getExecOutput} from '@actions/exec';
 import {
   arch,
   cacheDir,
@@ -9,6 +9,24 @@ import {
   resloveCached,
   resolveLatest
 } from './helpers';
+
+// Get the Helm major version (e.g., 3 or 4)
+async function getHelmMajorVersion(): Promise<number> {
+  try {
+    const output = await getExecOutput('helm', ['version', '--short'], {
+      silent: true
+    });
+    // Output format is like "v3.15.0+gc..." or "v4.0.0+g..."
+    const versionMatch = output.stdout.match(/^v?(\d+)\./);
+    if (versionMatch) {
+      return parseInt(versionMatch[1], 10);
+    }
+  } catch (error) {
+    core.warning(`Failed to get Helm version: ${error}`);
+  }
+  // Default to version 3 if we can't determine
+  return 3;
+}
 
 export async function installHelm(version: string): Promise<void> {
   if (version === 'latest') {
@@ -37,6 +55,10 @@ export async function installHelm(version: string): Promise<void> {
 }
 
 export async function installHelmPlugins(plugins: string[]): Promise<void> {
+  // Check Helm version to determine if --verify=false is needed (v4+)
+  const helmMajorVersion = await getHelmMajorVersion();
+  const verifyFlag = helmMajorVersion >= 4 ? '--verify=false ' : '';
+
   for (const plugin of plugins) {
     const pluginSpec = plugin.trim();
     let pluginUrl = pluginSpec;
@@ -63,8 +85,8 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
       }
     };
 
-    // Build the helm plugin install command
-    let installCommand = `helm plugin install --verify=false ${pluginUrl}`;
+    // Build the helm plugin install command (add --verify=false only for Helm v4+)
+    let installCommand = `helm plugin install ${verifyFlag}${pluginUrl}`;
     if (version) {
       installCommand += ` --version ${version}`;
     }

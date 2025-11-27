@@ -31266,6 +31266,26 @@ exports.installHelmPlugins = installHelmPlugins;
 const core = __importStar(__nccwpck_require__(7484));
 const exec_1 = __nccwpck_require__(5236);
 const helpers_1 = __nccwpck_require__(1302);
+// Get the Helm major version (e.g., 3 or 4)
+function getHelmMajorVersion() {
+    return __awaiter(this, void 0, void 0, function* () {
+        try {
+            const output = yield (0, exec_1.getExecOutput)('helm', ['version', '--short'], {
+                silent: true
+            });
+            // Output format is like "v3.15.0+gc..." or "v4.0.0+g..."
+            const versionMatch = output.stdout.match(/^v?(\d+)\./);
+            if (versionMatch) {
+                return parseInt(versionMatch[1], 10);
+            }
+        }
+        catch (error) {
+            core.warning(`Failed to get Helm version: ${error}`);
+        }
+        // Default to version 3 if we can't determine
+        return 3;
+    });
+}
 function installHelm(version) {
     return __awaiter(this, void 0, void 0, function* () {
         if (version === 'latest') {
@@ -31290,6 +31310,9 @@ function installHelm(version) {
 }
 function installHelmPlugins(plugins) {
     return __awaiter(this, void 0, void 0, function* () {
+        // Check Helm version to determine if --verify=false is needed (v4+)
+        const helmMajorVersion = yield getHelmMajorVersion();
+        const verifyFlag = helmMajorVersion >= 4 ? '--verify=false ' : '';
         for (const plugin of plugins) {
             const pluginSpec = plugin.trim();
             let pluginUrl = pluginSpec;
@@ -31312,8 +31335,8 @@ function installHelmPlugins(plugins) {
                     pluginStderr += data.toString();
                 }
             };
-            // Build the helm plugin install command
-            let installCommand = `helm plugin install --verify=false ${pluginUrl}`;
+            // Build the helm plugin install command (add --verify=false only for Helm v4+)
+            let installCommand = `helm plugin install ${verifyFlag}${pluginUrl}`;
             if (version) {
                 installCommand += ` --version ${version}`;
             }
