@@ -1,6 +1,6 @@
 import {installHelmPlugins} from '../src/helm';
 import * as core from '@actions/core';
-import {exec} from '@actions/exec';
+import {exec, getExecOutput} from '@actions/exec';
 
 // Mock the dependencies
 jest.mock('@actions/core');
@@ -8,10 +8,19 @@ jest.mock('@actions/exec');
 
 const mockCore = core as jest.Mocked<typeof core>;
 const mockExec = exec as jest.MockedFunction<typeof exec>;
+const mockGetExecOutput = getExecOutput as jest.MockedFunction<
+  typeof getExecOutput
+>;
 
 describe('installHelmPlugins', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // Mock Helm v4 version output so --verify=false flag is added
+    mockGetExecOutput.mockResolvedValue({
+      exitCode: 0,
+      stdout: 'v4.0.0+gc2a00e1',
+      stderr: ''
+    });
   });
 
   it('should install plugin without version', async () => {
@@ -117,6 +126,24 @@ describe('installHelmPlugins', () => {
     );
     expect(mockExec).toHaveBeenCalledWith(
       'helm plugin install --verify=false https://github.com/chartmuseum/helm-push --version v0.10.1',
+      [],
+      expect.any(Object)
+    );
+  });
+
+  it('should not add --verify=false flag for Helm v3', async () => {
+    // Override mock to return Helm v3 version
+    mockGetExecOutput.mockResolvedValue({
+      exitCode: 0,
+      stdout: 'v3.15.0+gc2a00e1',
+      stderr: ''
+    });
+    mockExec.mockResolvedValueOnce(0).mockResolvedValueOnce(0);
+
+    await installHelmPlugins(['https://github.com/databus23/helm-diff']);
+
+    expect(mockExec).toHaveBeenCalledWith(
+      'helm plugin install https://github.com/databus23/helm-diff',
       [],
       expect.any(Object)
     );
