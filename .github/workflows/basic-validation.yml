@@ -45,7 +45,6 @@ jobs:
         with:
           helmfile-auto-init: 'true'
           helm-plugins: >
-            https://github.com/databus23/helm-diff,
-            https://github.com/jkroepke/helm-secrets
+            https://github.com/databus23/helm-diff
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
