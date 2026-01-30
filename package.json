@@ -27,9 +27,9 @@
   "license": "MIT",
   "dependencies": {
     "@actions/core": "^1.11.1",
-    "@actions/exec": "^2.0.0",
-    "@actions/http-client": "^3.0.2",
-    "@actions/tool-cache": "^3.0.1"
+    "@actions/exec": "^1.1.1",
+    "@actions/http-client": "^2.2.3",
+    "@actions/tool-cache": "^2.0.2"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.3",
