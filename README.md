@@ -5,12 +5,13 @@ Setup [Helmfile](https://github.com/helmfile/helmfile) and [Helm](https://github
 This action works on Linux, macOS and Windows
 
 ```yaml
-- uses: helmfile/helmfile-action@v2.0.4
+- uses: helmfile/helmfile-action@v2.2.0
   with:
     helmfile-args: apply
 ```
 
 ## Optional Inputs
+
 - `helmfile-args` : helmfile arguments. Required.
 - `helmfile-version` : helmfile version. Default `"latest"`.
 - `helmfile-workdirectory` : helmfile working directory. Default `"."`
@@ -23,7 +24,7 @@ This action works on Linux, macOS and Windows
 Example with optional inputs
 
 ```yaml
-- uses: helmfile/helmfile-action@v2.0.5
+- uses: helmfile/helmfile-action@v2.2.0
   with:
     helmfile-version: 'v0.150.0'
     helm-version: 'v3.11.0'
@@ -31,10 +32,11 @@ Example with optional inputs
       https://github.com/databus23/helm-diff@v3.1.3,
       https://github.com/jkroepke/helm-secrets@v4.2.2
     helmfile-args: apply --environment prod
-    helmfile-auto-init: "false"
+    helmfile-auto-init: 'false'
 ```
 
 ## Outputs
+
 - `exit-code` : Exit code of helmfile. Useful to handle diff `--detailed-exitcode`.
 - `helmfile-stdout` : Standard output of helmfile command.
 - `helmfile-stderr` : Error output of helmfile command.
