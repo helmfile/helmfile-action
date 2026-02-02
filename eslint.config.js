@@ -1,25 +1,25 @@
-const {
+import {
     defineConfig,
     globalIgnores,
-} = require("eslint/config");
+} from "eslint/config";
 
-const tsParser = require("@typescript-eslint/parser");
-const typescriptEslint = require("@typescript-eslint/eslint-plugin");
-const jest = require("eslint-plugin-jest");
-const globals = require("globals");
-const js = require("@eslint/js");
+import tsParser from "@typescript-eslint/parser";
+import typescriptEslint from "@typescript-eslint/eslint-plugin";
+import jest from "eslint-plugin-jest";
+import globals from "globals";
+import js from "@eslint/js";
 
-const {
+import {
     FlatCompat,
-} = require("@eslint/eslintrc");
+} from "@eslint/eslintrc";
 
 const compat = new FlatCompat({
-    baseDirectory: __dirname,
+    baseDirectory: import.meta.dirname,
     recommendedConfig: js.configs.recommended,
     allConfig: js.configs.all
 });
 
-module.exports = defineConfig([{
+export default defineConfig([{
     extends: compat.extends(
         "eslint:recommended",
         "plugin:@typescript-eslint/recommended",
@@ -73,4 +73,4 @@ module.exports = defineConfig([{
         "jest/no-conditional-expect": "off",
         "no-console": "off",
     },
-}, globalIgnores(["**/dist/", "**/lib/", "**/node_modules/", "**/jest.config.js"])]);
+}, globalIgnores(["**/dist/", "**/lib/", "**/node_modules/", "**/jest.config.mjs", "**/jest.setup.js"])]);

@@ -2,7 +2,7 @@ import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import {installHelm, installHelmPlugins} from './helm';
 import {installHelmfile, HelmfileInit} from './helmfile';
-import fs from 'fs';
+import * as fs from 'fs';
 
 async function run(): Promise<void> {
   try {
@@ -68,16 +68,9 @@ async function run(): Promise<void> {
 
       // write helmfileKubeconfigContext to the ~/.kube/config file
       const helmfileKubeconfigContextFile = `${process.env.HOME}/.kube/config`;
-      fs.writeFile(
+      fs.promises.writeFile(
         helmfileKubeconfigContextFile,
-        helmfileKubeconfigContext,
-        err => {
-          if (err) {
-            throw new Error(
-              `Failed to write helmfile-kubeconfig-context to ${helmfileKubeconfigContextFile}`
-            );
-          }
-        }
+        helmfileKubeconfigContext
       );
       core.endGroup();
     }
