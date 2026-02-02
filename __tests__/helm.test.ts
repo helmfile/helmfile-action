@@ -1,10 +1,28 @@
-import {installHelmPlugins} from '../src/helm';
-import * as core from '@actions/core';
-import {exec, getExecOutput} from '@actions/exec';
+import {jest} from '@jest/globals';
 
-// Mock the dependencies
-jest.mock('@actions/core');
-jest.mock('@actions/exec');
+// Mock the dependencies BEFORE importing the code under test
+jest.unstable_mockModule('@actions/core', () => ({
+  getInput: jest.fn(),
+  getBooleanInput: jest.fn(),
+  setFailed: jest.fn(),
+  setOutput: jest.fn(),
+  info: jest.fn(),
+  debug: jest.fn(),
+  warning: jest.fn(),
+  error: jest.fn(),
+  startGroup: jest.fn(),
+  endGroup: jest.fn(),
+  addPath: jest.fn()
+}));
+
+jest.unstable_mockModule('@actions/exec', () => ({
+  exec: jest.fn(),
+  getExecOutput: jest.fn()
+}));
+
+const {installHelmPlugins} = await import('../src/helm');
+const core = (await import('@actions/core')) as any;
+const {exec, getExecOutput} = await import('@actions/exec');
 
 const mockCore = core as jest.Mocked<typeof core>;
 const mockExec = exec as jest.MockedFunction<typeof exec>;
