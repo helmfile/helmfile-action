@@ -34356,6 +34356,7 @@ async function helpers_cacheDir(path, tool, version) {
 
 
 
+
 // Get the Helm major version (e.g., 3 or 4)
 async function getHelmMajorVersion() {
     try {
@@ -34373,6 +34374,63 @@ async function getHelmMajorVersion() {
     }
     // Default to version 3 if we can't determine
     return 3;
+}
+// Import a GitHub user's GPG public key for Helm v4 plugin verification.
+// After importing, exports keys to pubring.gpg (legacy format) because
+// Helm v4 looks for the old GnuPG v1 keyring file, not the modern pubring.kbx.
+async function importPluginGpgKey(owner) {
+    try {
+        const keyUrl = `https://github.com/${owner}.gpg`;
+        info(`Importing GPG key for plugin verification from ${keyUrl}`);
+        const httpClient = new lib_HttpClient('helmfile-action');
+        const response = await httpClient.get(keyUrl);
+        const keyData = await response.readBody();
+        await exec_exec('gpg --import --batch', [], {
+            input: Buffer.from(keyData)
+        });
+        // Helm v4 reads pubring.gpg (GnuPG v1 format), but modern gpg stores
+        // keys in pubring.kbx (v2 format). Export the keyring to the legacy file.
+        const gnupgHome = process.env.GNUPGHOME || `${process.env.HOME || '~'}/.gnupg`;
+        await exec_exec(`gpg --batch --yes --export --output ${gnupgHome}/pubring.gpg`, []);
+    }
+    catch (error) {
+        warning(`Failed to import GPG key for ${owner}: ${error}`);
+    }
+}
+// Resolve Helm v4-compatible .tgz plugin assets from a GitHub release.
+// Helm v4 plugins are distributed as .tgz archives with .prov provenance files.
+// Returns download URLs for v4 plugin packages, or empty array if none found.
+async function resolveHelmV4PluginAssets(pluginUrl, version) {
+    const match = pluginUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
+    if (!match)
+        return [];
+    const owner = match[1];
+    const repo = match[2].replace(/\.git$/, '');
+    try {
+        const headers = {};
+        if (process.env.GITHUB_TOKEN) {
+            headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
+        }
+        const httpClient = new lib_HttpClient('helmfile-action', [], { headers });
+        const releaseUrl = version
+            ? `https://api.github.com/repos/${owner}/${repo}/releases/tags/${version}`
+            : `https://api.github.com/repos/${owner}/${repo}/releases/latest`;
+        const response = await httpClient.getJson(releaseUrl);
+        const assets = response.result?.assets || [];
+        // Helm v4 plugin packages have companion .prov (provenance) files.
+        // Platform-specific binaries (e.g., helm-diff-linux-amd64.tgz) do not.
+        const provNames = new Set(assets
+            .filter(a => a.name.endsWith('.tgz.prov'))
+            .map(a => a.name.replace(/\.prov$/, '')));
+        const v4PluginUrls = assets
+            .filter(a => a.name.endsWith('.tgz') && provNames.has(a.name))
+            .map(a => a.browser_download_url);
+        return v4PluginUrls;
+    }
+    catch (error) {
+        warning(`Failed to resolve Helm v4 plugin assets for ${pluginUrl}: ${error}`);
+        return [];
+    }
 }
 async function installHelm(version) {
     if (version === 'latest') {
@@ -34395,9 +34453,8 @@ async function installHelm(version) {
     addPath(toolPath);
 }
 async function installHelmPlugins(plugins) {
-    // Check Helm version to determine if --verify=false is needed (v4+)
+    // Check Helm version to determine install strategy
     const helmMajorVersion = await getHelmMajorVersion();
-    const verifyFlag = helmMajorVersion >= 4 ? '--verify=false ' : '';
     for (const plugin of plugins) {
         const pluginSpec = plugin.trim();
         let pluginUrl = pluginSpec;
@@ -34412,6 +34469,47 @@ async function installHelmPlugins(plugins) {
                 version = potentialVersion;
             }
         }
+        // For Helm v4+, try installing from .tgz release assets first.
+        // Helm v4 requires plugins to be distributed as .tgz packages to register
+        // as subcommands. Installing from a repo URL registers them as "legacy"
+        // plugins that don't expose subcommands (e.g., "helm secrets" won't work).
+        if (helmMajorVersion >= 4) {
+            const v4Assets = await resolveHelmV4PluginAssets(pluginUrl, version);
+            if (v4Assets.length > 0) {
+                info(`Found ${v4Assets.length} Helm v4 plugin package(s) for ${pluginUrl}`);
+                // Import the plugin author's GPG key for signature verification
+                const ownerMatch = pluginUrl.match(/github\.com\/([^/]+)\//);
+                if (ownerMatch) {
+                    await importPluginGpgKey(ownerMatch[1]);
+                }
+                for (const assetUrl of v4Assets) {
+                    let assetStderr = '';
+                    const assetOptions = {
+                        ignoreReturnCode: true,
+                        listeners: {
+                            stderr: (data) => {
+                                assetStderr += data.toString();
+                            }
+                        }
+                    };
+                    const eCode = await exec_exec(`helm plugin install ${assetUrl}`, [], assetOptions);
+                    if (eCode === 0) {
+                        info(`Installed Helm v4 plugin from ${assetUrl}`);
+                    }
+                    else if (assetStderr.includes('plugin already exists')) {
+                        info(`Plugin from ${assetUrl} already exists`);
+                    }
+                    else {
+                        throw new Error(`Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`);
+                    }
+                }
+                continue;
+            }
+            // No v4 .tgz packages found — fall back to legacy install with --verify=false
+            info(`No Helm v4 plugin packages found for ${pluginUrl}, using legacy install`);
+        }
+        // Legacy install: Helm v3, or Helm v4 fallback for plugins without .tgz packages
+        const verifyFlag = helmMajorVersion >= 4 ? '--verify=false ' : '';
         let pluginStderr = '';
         const options = {};
         options.ignoreReturnCode = true;
@@ -34420,7 +34518,6 @@ async function installHelmPlugins(plugins) {
                 pluginStderr += data.toString();
             }
         };
-        // Build the helm plugin install command (add --verify=false only for Helm v4+)
         let installCommand = `helm plugin install ${verifyFlag}${pluginUrl}`;
         if (version) {
             installCommand += ` --version ${version}`;
