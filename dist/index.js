@@ -34375,6 +34375,22 @@ async function getHelmMajorVersion() {
     // Default to version 3 if we can't determine
     return 3;
 }
+// Import a GitHub user's GPG public key for Helm v4 plugin verification.
+async function importPluginGpgKey(owner) {
+    try {
+        const keyUrl = `https://github.com/${owner}.gpg`;
+        info(`Importing GPG key for plugin verification from ${keyUrl}`);
+        const httpClient = new lib_HttpClient('helmfile-action');
+        const response = await httpClient.get(keyUrl);
+        const keyData = await response.readBody();
+        await exec_exec('gpg --import --batch', [], {
+            input: Buffer.from(keyData)
+        });
+    }
+    catch (error) {
+        warning(`Failed to import GPG key for ${owner}: ${error}`);
+    }
+}
 // Resolve Helm v4-compatible .tgz plugin assets from a GitHub release.
 // Helm v4 plugins are distributed as .tgz archives with .prov provenance files.
 // Returns download URLs for v4 plugin packages, or empty array if none found.
@@ -34455,6 +34471,11 @@ async function installHelmPlugins(plugins) {
             const v4Assets = await resolveHelmV4PluginAssets(pluginUrl, version);
             if (v4Assets.length > 0) {
                 info(`Found ${v4Assets.length} Helm v4 plugin package(s) for ${pluginUrl}`);
+                // Import the plugin author's GPG key for signature verification
+                const ownerMatch = pluginUrl.match(/github\.com\/([^/]+)\//);
+                if (ownerMatch) {
+                    await importPluginGpgKey(ownerMatch[1]);
+                }
                 for (const assetUrl of v4Assets) {
                     let assetStderr = '';
                     const assetOptions = {

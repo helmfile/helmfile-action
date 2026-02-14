@@ -1,6 +1,7 @@
 import {jest} from '@jest/globals';
 
 const mockGetJson = jest.fn<any>();
+const mockHttpGet = jest.fn<any>();
 
 // Mock the dependencies BEFORE importing the code under test
 jest.unstable_mockModule('@actions/core', () => ({
@@ -24,11 +25,12 @@ jest.unstable_mockModule('@actions/exec', () => ({
 
 jest.unstable_mockModule('@actions/http-client', () => ({
   HttpClient: jest.fn().mockImplementation(() => ({
-    getJson: mockGetJson
+    getJson: mockGetJson,
+    get: mockHttpGet
   }))
 }));
 
-const {installHelmPlugins, resolveHelmV4PluginAssets} =
+const {installHelmPlugins, resolveHelmV4PluginAssets, importPluginGpgKey} =
   await import('../src/helm');
 const core = (await import('@actions/core')) as any;
 const {exec, getExecOutput} = await import('@actions/exec');
@@ -50,6 +52,8 @@ describe('installHelmPlugins', () => {
     });
     // By default, return no v4 plugin assets (tests the legacy fallback path)
     mockGetJson.mockResolvedValue({result: {assets: []}});
+    // Mock GPG key fetch
+    mockHttpGet.mockResolvedValue({readBody: async () => 'mock-gpg-key-data'});
   });
 
   it('should install plugin without version', async () => {
@@ -234,6 +238,13 @@ describe('installHelmPlugins', () => {
       [],
       expect.any(Object)
     );
+    // Should import the plugin author's GPG key
+    expect(mockHttpGet).toHaveBeenCalledWith('https://github.com/jkroepke.gpg');
+    expect(mockExec).toHaveBeenCalledWith(
+      'gpg --import --batch',
+      [],
+      expect.objectContaining({input: expect.any(Buffer)})
+    );
   });
 
   it('should fall back to legacy install when no .tgz assets found on Helm v4', async () => {
@@ -393,6 +404,36 @@ describe('resolveHelmV4PluginAssets', () => {
 
     expect(mockGetJson).toHaveBeenCalledWith(
       'https://api.github.com/repos/jkroepke/helm-secrets/releases/tags/v4.7.1'
+    );
+  });
+});
+
+describe('importPluginGpgKey', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('should fetch and import GPG key from GitHub', async () => {
+    mockHttpGet.mockResolvedValueOnce({
+      readBody: async () => 'pgp-key-data'
+    });
+    mockExec.mockResolvedValueOnce(0);
+
+    await importPluginGpgKey('jkroepke');
+
+    expect(mockHttpGet).toHaveBeenCalledWith('https://github.com/jkroepke.gpg');
+    expect(mockExec).toHaveBeenCalledWith('gpg --import --batch', [], {
+      input: Buffer.from('pgp-key-data')
+    });
+  });
+
+  it('should warn and not throw when GPG import fails', async () => {
+    mockHttpGet.mockRejectedValueOnce(new Error('network error'));
+
+    await importPluginGpgKey('unknown-user');
+
+    expect(mockCore.warning).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to import GPG key for unknown-user')
     );
   });
 });
