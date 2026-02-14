@@ -238,12 +238,16 @@ describe('installHelmPlugins', () => {
       [],
       expect.any(Object)
     );
-    // Should import the plugin author's GPG key
+    // Should import the plugin author's GPG key and export to legacy format
     expect(mockHttpGet).toHaveBeenCalledWith('https://github.com/jkroepke.gpg');
     expect(mockExec).toHaveBeenCalledWith(
       'gpg --import --batch',
       [],
       expect.objectContaining({input: expect.any(Buffer)})
+    );
+    expect(mockExec).toHaveBeenCalledWith(
+      expect.stringContaining('gpg --batch --yes --export --output'),
+      []
     );
   });
 
@@ -413,11 +417,11 @@ describe('importPluginGpgKey', () => {
     jest.clearAllMocks();
   });
 
-  it('should fetch and import GPG key from GitHub', async () => {
+  it('should fetch and import GPG key from GitHub and export to legacy format', async () => {
     mockHttpGet.mockResolvedValueOnce({
       readBody: async () => 'pgp-key-data'
     });
-    mockExec.mockResolvedValueOnce(0);
+    mockExec.mockResolvedValueOnce(0).mockResolvedValueOnce(0);
 
     await importPluginGpgKey('jkroepke');
 
@@ -425,6 +429,11 @@ describe('importPluginGpgKey', () => {
     expect(mockExec).toHaveBeenCalledWith('gpg --import --batch', [], {
       input: Buffer.from('pgp-key-data')
     });
+    // Should export keys to legacy pubring.gpg format for Helm v4
+    expect(mockExec).toHaveBeenCalledWith(
+      expect.stringContaining('gpg --batch --yes --export --output'),
+      []
+    );
   });
 
   it('should warn and not throw when GPG import fails', async () => {

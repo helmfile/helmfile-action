@@ -30,6 +30,8 @@ async function getHelmMajorVersion(): Promise<number> {
 }
 
 // Import a GitHub user's GPG public key for Helm v4 plugin verification.
+// After importing, exports keys to pubring.gpg (legacy format) because
+// Helm v4 looks for the old GnuPG v1 keyring file, not the modern pubring.kbx.
 export async function importPluginGpgKey(owner: string): Promise<void> {
   try {
     const keyUrl = `https://github.com/${owner}.gpg`;
@@ -40,6 +42,14 @@ export async function importPluginGpgKey(owner: string): Promise<void> {
     await exec('gpg --import --batch', [], {
       input: Buffer.from(keyData)
     });
+    // Helm v4 reads pubring.gpg (GnuPG v1 format), but modern gpg stores
+    // keys in pubring.kbx (v2 format). Export the keyring to the legacy file.
+    const gnupgHome =
+      process.env.GNUPGHOME || `${process.env.HOME || '~'}/.gnupg`;
+    await exec(
+      `gpg --batch --yes --export --output ${gnupgHome}/pubring.gpg`,
+      []
+    );
   } catch (error) {
     core.warning(`Failed to import GPG key for ${owner}: ${error}`);
   }
