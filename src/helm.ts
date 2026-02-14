@@ -1,5 +1,6 @@
 import * as core from '@actions/core';
 import {exec, ExecOptions, getExecOutput} from '@actions/exec';
+import * as http from '@actions/http-client';
 import {
   arch,
   cacheDir,
@@ -26,6 +27,56 @@ async function getHelmMajorVersion(): Promise<number> {
   }
   // Default to version 3 if we can't determine
   return 3;
+}
+
+// Resolve Helm v4-compatible .tgz plugin assets from a GitHub release.
+// Helm v4 plugins are distributed as .tgz archives with .prov provenance files.
+// Returns download URLs for v4 plugin packages, or empty array if none found.
+export async function resolveHelmV4PluginAssets(
+  pluginUrl: string,
+  version: string
+): Promise<string[]> {
+  const match = pluginUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
+  if (!match) return [];
+
+  const owner = match[1];
+  const repo = match[2].replace(/\.git$/, '');
+
+  try {
+    const headers: Record<string, string> = {};
+    if (process.env.GITHUB_TOKEN) {
+      headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
+    }
+    const httpClient = new http.HttpClient('helmfile-action', [], {headers});
+
+    const releaseUrl = version
+      ? `https://api.github.com/repos/${owner}/${repo}/releases/tags/${version}`
+      : `https://api.github.com/repos/${owner}/${repo}/releases/latest`;
+
+    const response = await httpClient.getJson<{
+      assets: {name: string; browser_download_url: string}[];
+    }>(releaseUrl);
+    const assets = response.result?.assets || [];
+
+    // Helm v4 plugin packages have companion .prov (provenance) files.
+    // Platform-specific binaries (e.g., helm-diff-linux-amd64.tgz) do not.
+    const provNames = new Set(
+      assets
+        .filter(a => a.name.endsWith('.tgz.prov'))
+        .map(a => a.name.replace(/\.prov$/, ''))
+    );
+
+    const v4PluginUrls = assets
+      .filter(a => a.name.endsWith('.tgz') && provNames.has(a.name))
+      .map(a => a.browser_download_url);
+
+    return v4PluginUrls;
+  } catch (error) {
+    core.warning(
+      `Failed to resolve Helm v4 plugin assets for ${pluginUrl}: ${error}`
+    );
+    return [];
+  }
 }
 
 export async function installHelm(version: string): Promise<void> {
@@ -55,9 +106,8 @@ export async function installHelm(version: string): Promise<void> {
 }
 
 export async function installHelmPlugins(plugins: string[]): Promise<void> {
-  // Check Helm version to determine if --verify=false is needed (v4+)
+  // Check Helm version to determine install strategy
   const helmMajorVersion = await getHelmMajorVersion();
-  const verifyFlag = helmMajorVersion >= 4 ? '--verify=false ' : '';
 
   for (const plugin of plugins) {
     const pluginSpec = plugin.trim();
@@ -75,6 +125,53 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
       }
     }
 
+    // For Helm v4+, try installing from .tgz release assets first.
+    // Helm v4 requires plugins to be distributed as .tgz packages to register
+    // as subcommands. Installing from a repo URL registers them as "legacy"
+    // plugins that don't expose subcommands (e.g., "helm secrets" won't work).
+    if (helmMajorVersion >= 4) {
+      const v4Assets = await resolveHelmV4PluginAssets(pluginUrl, version);
+      if (v4Assets.length > 0) {
+        core.info(
+          `Found ${v4Assets.length} Helm v4 plugin package(s) for ${pluginUrl}`
+        );
+        for (const assetUrl of v4Assets) {
+          let assetStderr = '';
+          const assetOptions: ExecOptions = {
+            ignoreReturnCode: true,
+            listeners: {
+              stderr: (data: Buffer) => {
+                assetStderr += data.toString();
+              }
+            }
+          };
+
+          const eCode = await exec(
+            `helm plugin install ${assetUrl}`,
+            [],
+            assetOptions
+          );
+
+          if (eCode === 0) {
+            core.info(`Installed Helm v4 plugin from ${assetUrl}`);
+          } else if (assetStderr.includes('plugin already exists')) {
+            core.info(`Plugin from ${assetUrl} already exists`);
+          } else {
+            throw new Error(
+              `Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`
+            );
+          }
+        }
+        continue;
+      }
+      // No v4 .tgz packages found — fall back to legacy install with --verify=false
+      core.info(
+        `No Helm v4 plugin packages found for ${pluginUrl}, using legacy install`
+      );
+    }
+
+    // Legacy install: Helm v3, or Helm v4 fallback for plugins without .tgz packages
+    const verifyFlag = helmMajorVersion >= 4 ? '--verify=false ' : '';
     let pluginStderr = '';
 
     const options: ExecOptions = {};
@@ -85,7 +182,6 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
       }
     };
 
-    // Build the helm plugin install command (add --verify=false only for Helm v4+)
     let installCommand = `helm plugin install ${verifyFlag}${pluginUrl}`;
     if (version) {
       installCommand += ` --version ${version}`;
