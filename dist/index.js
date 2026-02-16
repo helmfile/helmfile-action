@@ -34360,6 +34360,7 @@ async function helpers_cacheDir(path, tool, version) {
 
 
 
+const GITHUB_REPO_REGEX = /github\.com\/([^/]+)\/([^/]+)/;
 // Get the Helm major version (e.g., 3 or 4)
 async function getHelmMajorVersion() {
     try {
@@ -34416,7 +34417,7 @@ async function importPluginGpgKey(owner) {
 // Helm v4 plugins are distributed as .tgz archives with .prov provenance files.
 // Returns download URLs for v4 plugin packages, or empty array if none found.
 async function resolveHelmV4PluginAssets(pluginUrl, version) {
-    const match = pluginUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
+    const match = pluginUrl.match(GITHUB_REPO_REGEX);
     if (!match)
         return [];
     const owner = match[1];
@@ -34425,6 +34426,10 @@ async function resolveHelmV4PluginAssets(pluginUrl, version) {
         const headers = {};
         if (process.env.GITHUB_TOKEN) {
             headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
+        }
+        else {
+            core_debug('GITHUB_TOKEN is not set. GitHub API requests may be rate-limited. ' +
+                'Set the GITHUB_TOKEN environment variable to increase the rate limit.');
         }
         const httpClient = new lib_HttpClient('helmfile-action', [], { headers });
         // Build candidate release URLs. When a version is specified, try both
@@ -34522,7 +34527,7 @@ async function installHelmPlugins(plugins) {
             if (v4Assets.length > 0) {
                 info(`Found ${v4Assets.length} Helm v4 plugin package(s) for ${pluginUrl}`);
                 // Import the plugin author's GPG key for signature verification
-                const ownerMatch = pluginUrl.match(/github\.com\/([^/]+)\//);
+                const ownerMatch = pluginUrl.match(GITHUB_REPO_REGEX);
                 if (ownerMatch) {
                     await importPluginGpgKey(ownerMatch[1]);
                 }

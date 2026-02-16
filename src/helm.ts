@@ -13,6 +13,8 @@ import {
   resolveLatest
 } from './helpers';
 
+const GITHUB_REPO_REGEX = /github\.com\/([^/]+)\/([^/]+)/;
+
 // Get the Helm major version (e.g., 3 or 4)
 async function getHelmMajorVersion(): Promise<number> {
   try {
@@ -75,7 +77,7 @@ export async function resolveHelmV4PluginAssets(
   pluginUrl: string,
   version: string
 ): Promise<string[]> {
-  const match = pluginUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
+  const match = pluginUrl.match(GITHUB_REPO_REGEX);
   if (!match) return [];
 
   const owner = match[1];
@@ -85,6 +87,11 @@ export async function resolveHelmV4PluginAssets(
     const headers: Record<string, string> = {};
     if (process.env.GITHUB_TOKEN) {
       headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
+    } else {
+      core.debug(
+        'GITHUB_TOKEN is not set. GitHub API requests may be rate-limited. ' +
+          'Set the GITHUB_TOKEN environment variable to increase the rate limit.'
+      );
     }
     const httpClient = new http.HttpClient('helmfile-action', [], {headers});
 
@@ -211,7 +218,7 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
           `Found ${v4Assets.length} Helm v4 plugin package(s) for ${pluginUrl}`
         );
         // Import the plugin author's GPG key for signature verification
-        const ownerMatch = pluginUrl.match(/github\.com\/([^/]+)\//);
+        const ownerMatch = pluginUrl.match(GITHUB_REPO_REGEX);
         if (ownerMatch) {
           await importPluginGpgKey(ownerMatch[1]);
         }
