@@ -30741,6 +30741,7 @@ function file_command_prepareKeyValueMessage(key, value) {
 //# sourceMappingURL=file-command.js.map
 ;// CONCATENATED MODULE: external "path"
 const external_path_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("path");
+var external_path_default = /*#__PURE__*/__nccwpck_require__.n(external_path_namespaceObject);
 // EXTERNAL MODULE: external "http"
 var external_http_ = __nccwpck_require__(8611);
 var external_http_namespaceObject = /*#__PURE__*/__nccwpck_require__.t(external_http_, 2);
@@ -34357,6 +34358,8 @@ async function helpers_cacheDir(path, tool, version) {
 
 
 
+
+
 // Get the Helm major version (e.g., 3 or 4)
 async function getHelmMajorVersion() {
     try {
@@ -34390,8 +34393,9 @@ async function importPluginGpgKey(owner) {
         });
         // Helm v4 reads pubring.gpg (GnuPG v1 format), but modern gpg stores
         // keys in pubring.kbx (v2 format). Export the keyring to the legacy file.
-        const gnupgHome = process.env.GNUPGHOME || `${process.env.HOME || '~'}/.gnupg`;
-        await exec_exec(`gpg --batch --yes --export --output ${gnupgHome}/pubring.gpg`, []);
+        const gnupgHome = process.env.GNUPGHOME || external_path_default().join(external_os_default().homedir(), '.gnupg');
+        const pubringPath = external_path_default().join(gnupgHome, 'pubring.gpg');
+        await exec_exec(`gpg --batch --yes --export --output "${pubringPath}"`, []);
     }
     catch (error) {
         warning(`Failed to import GPG key for ${owner}: ${error}`);

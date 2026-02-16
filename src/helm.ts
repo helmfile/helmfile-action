@@ -1,6 +1,8 @@
 import * as core from '@actions/core';
 import {exec, ExecOptions, getExecOutput} from '@actions/exec';
 import * as http from '@actions/http-client';
+import os from 'os';
+import path from 'path';
 import {
   arch,
   cacheDir,
@@ -45,11 +47,9 @@ export async function importPluginGpgKey(owner: string): Promise<void> {
     // Helm v4 reads pubring.gpg (GnuPG v1 format), but modern gpg stores
     // keys in pubring.kbx (v2 format). Export the keyring to the legacy file.
     const gnupgHome =
-      process.env.GNUPGHOME || `${process.env.HOME || '~'}/.gnupg`;
-    await exec(
-      `gpg --batch --yes --export --output ${gnupgHome}/pubring.gpg`,
-      []
-    );
+      process.env.GNUPGHOME || path.join(os.homedir(), '.gnupg');
+    const pubringPath = path.join(gnupgHome, 'pubring.gpg');
+    await exec(`gpg --batch --yes --export --output "${pubringPath}"`, []);
   } catch (error) {
     core.warning(`Failed to import GPG key for ${owner}: ${error}`);
   }
