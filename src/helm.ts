@@ -291,13 +291,13 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
 
     const eCode = await exec('helm', installArgs, options);
 
-    if (eCode == 0) {
+    if (eCode === 0) {
       const versionInfo = version ? ` (version ${version})` : '';
       core.info(`Plugin ${pluginUrl}${versionInfo} installed successfully`);
       continue;
     }
 
-    if (eCode == 1 && pluginStderr.includes('plugin already exists')) {
+    if (eCode === 1 && pluginStderr.includes('plugin already exists')) {
       const versionInfo = version ? ` (version ${version})` : '';
       core.info(`Plugin ${pluginUrl}${versionInfo} already exists`);
     } else {
@@ -305,5 +305,5 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
     }
   }
 
-  await exec('helm plugin list');
+  await exec('helm', ['plugin', 'list']);
 }

@@ -34583,12 +34583,12 @@ async function installHelmPlugins(plugins) {
             installArgs.push('--version', version);
         }
         const eCode = await exec_exec('helm', installArgs, options);
-        if (eCode == 0) {
+        if (eCode === 0) {
             const versionInfo = version ? ` (version ${version})` : '';
             info(`Plugin ${pluginUrl}${versionInfo} installed successfully`);
             continue;
         }
-        if (eCode == 1 && pluginStderr.includes('plugin already exists')) {
+        if (eCode === 1 && pluginStderr.includes('plugin already exists')) {
             const versionInfo = version ? ` (version ${version})` : '';
             info(`Plugin ${pluginUrl}${versionInfo} already exists`);
         }
@@ -34596,7 +34596,7 @@ async function installHelmPlugins(plugins) {
             throw new Error(pluginStderr);
         }
     }
-    await exec_exec('helm plugin list');
+    await exec_exec('helm', ['plugin', 'list']);
 }
 
 ;// CONCATENATED MODULE: ./src/helmfile.ts
