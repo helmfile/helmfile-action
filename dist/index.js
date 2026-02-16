@@ -34509,7 +34509,11 @@ async function installHelmPlugins(plugins) {
         // as subcommands. Installing from a repo URL registers them as "legacy"
         // plugins that don't expose subcommands (e.g., "helm secrets" won't work).
         if (helmMajorVersion >= 4) {
-            const v4Assets = await resolveHelmV4PluginAssets(pluginUrl, version);
+            // If the URL already points to a .tgz archive, install it directly
+            // instead of querying the releases API (which could resolve different assets).
+            const v4Assets = pluginUrl.endsWith('.tgz')
+                ? [pluginUrl]
+                : await resolveHelmV4PluginAssets(pluginUrl, version);
             if (v4Assets.length > 0) {
                 info(`Found ${v4Assets.length} Helm v4 plugin package(s) for ${pluginUrl}`);
                 // Import the plugin author's GPG key for signature verification

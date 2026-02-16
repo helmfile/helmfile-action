@@ -309,6 +309,23 @@ describe('installHelmPlugins', () => {
     );
   });
 
+  it('should install direct .tgz URL without querying GitHub API', async () => {
+    mockExec.mockResolvedValue(0);
+
+    await installHelmPlugins([
+      'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz'
+    ]);
+
+    // Should NOT query the GitHub releases API
+    expect(mockGetJson).not.toHaveBeenCalled();
+    // Should install the .tgz URL directly
+    expect(mockExec).toHaveBeenCalledWith(
+      'helm plugin install https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz',
+      [],
+      expect.any(Object)
+    );
+  });
+
   it('should fall back to legacy install when no .tgz assets found on Helm v4', async () => {
     // Mock GitHub API returning only platform-specific archives (no .prov files)
     mockGetJson.mockResolvedValueOnce({
