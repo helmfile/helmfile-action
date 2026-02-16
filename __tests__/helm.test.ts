@@ -251,6 +251,64 @@ describe('installHelmPlugins', () => {
     );
   });
 
+  it('should retry .tgz install with --verify=false when verification fails', async () => {
+    // Mock GitHub API returning v4 plugin packages
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'secrets-4.7.1.tgz',
+            browser_download_url:
+              'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz'
+          },
+          {
+            name: 'secrets-4.7.1.tgz.prov',
+            browser_download_url:
+              'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz.prov'
+          }
+        ]
+      }
+    });
+
+    mockExec
+      // gpg --import
+      .mockResolvedValueOnce(0)
+      // gpg --export (pubring.gpg)
+      .mockResolvedValueOnce(0)
+      // First install attempt — verification fails
+      .mockImplementationOnce((_command, _args, opts) => {
+        if (opts?.listeners?.stderr) {
+          opts.listeners.stderr(
+            Buffer.from('plugin verification failed: open pubring.gpg')
+          );
+        }
+        return Promise.resolve(1);
+      })
+      // Retry with --verify=false — succeeds
+      .mockResolvedValueOnce(0)
+      // helm plugin list
+      .mockResolvedValueOnce(0);
+
+    await installHelmPlugins([
+      'https://github.com/jkroepke/helm-secrets@v4.7.1'
+    ]);
+
+    // Should warn about verification failure
+    expect(mockCore.warning).toHaveBeenCalledWith(
+      expect.stringContaining('Verification failed')
+    );
+    // Should retry with --verify=false
+    expect(mockExec).toHaveBeenCalledWith(
+      'helm plugin install --verify=false https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz',
+      [],
+      expect.any(Object)
+    );
+    // Should report success (unverified)
+    expect(mockCore.info).toHaveBeenCalledWith(
+      expect.stringContaining('unverified')
+    );
+  });
+
   it('should fall back to legacy install when no .tgz assets found on Helm v4', async () => {
     // Mock GitHub API returning only platform-specific archives (no .prov files)
     mockGetJson.mockResolvedValueOnce({

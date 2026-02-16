@@ -215,7 +215,7 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
             }
           };
 
-          const eCode = await exec(
+          let eCode = await exec(
             `helm plugin install ${assetUrl}`,
             [],
             assetOptions
@@ -226,9 +226,28 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
           } else if (assetStderr.includes('plugin already exists')) {
             core.info(`Plugin from ${assetUrl} already exists`);
           } else {
-            throw new Error(
-              `Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`
+            // Verification failed (e.g., GPG key missing/wrong) — retry with
+            // --verify=false. The .tgz still registers as a proper v4 plugin.
+            core.warning(
+              `Verification failed for ${assetUrl}, retrying with --verify=false`
             );
+            assetStderr = '';
+            eCode = await exec(
+              `helm plugin install --verify=false ${assetUrl}`,
+              [],
+              assetOptions
+            );
+            if (eCode === 0) {
+              core.info(
+                `Installed Helm v4 plugin from ${assetUrl} (unverified)`
+              );
+            } else if (assetStderr.includes('plugin already exists')) {
+              core.info(`Plugin from ${assetUrl} already exists`);
+            } else {
+              throw new Error(
+                `Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`
+              );
+            }
           }
         }
         continue;

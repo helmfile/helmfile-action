@@ -34527,7 +34527,7 @@ async function installHelmPlugins(plugins) {
                             }
                         }
                     };
-                    const eCode = await exec_exec(`helm plugin install ${assetUrl}`, [], assetOptions);
+                    let eCode = await exec_exec(`helm plugin install ${assetUrl}`, [], assetOptions);
                     if (eCode === 0) {
                         info(`Installed Helm v4 plugin from ${assetUrl}`);
                     }
@@ -34535,7 +34535,20 @@ async function installHelmPlugins(plugins) {
                         info(`Plugin from ${assetUrl} already exists`);
                     }
                     else {
-                        throw new Error(`Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`);
+                        // Verification failed (e.g., GPG key missing/wrong) — retry with
+                        // --verify=false. The .tgz still registers as a proper v4 plugin.
+                        warning(`Verification failed for ${assetUrl}, retrying with --verify=false`);
+                        assetStderr = '';
+                        eCode = await exec_exec(`helm plugin install --verify=false ${assetUrl}`, [], assetOptions);
+                        if (eCode === 0) {
+                            info(`Installed Helm v4 plugin from ${assetUrl} (unverified)`);
+                        }
+                        else if (assetStderr.includes('plugin already exists')) {
+                            info(`Plugin from ${assetUrl} already exists`);
+                        }
+                        else {
+                            throw new Error(`Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`);
+                        }
                     }
                 }
                 continue;
