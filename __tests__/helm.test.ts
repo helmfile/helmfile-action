@@ -687,6 +687,33 @@ describe('resolveHelmV4PluginAssets', () => {
     );
     expect(result).toEqual(['https://example.com/plugin-1.0.0.tgz']);
   });
+
+  it('should not warn when first tag 404s but second tag succeeds with no v4 assets', async () => {
+    const core = (await import('@actions/core')) as any;
+    // First call (v3.15.0) — 404
+    mockGetJson.mockRejectedValueOnce(new Error('Not Found'));
+    // Second call (3.15.0) — succeeds but no .prov companions
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'helm-diff-linux-amd64.tgz',
+            browser_download_url:
+              'https://example.com/helm-diff-linux-amd64.tgz'
+          }
+        ]
+      }
+    });
+
+    const result = await resolveHelmV4PluginAssets(
+      'https://github.com/databus23/helm-diff',
+      '3.15.0'
+    );
+
+    expect(result).toEqual([]);
+    // The 404 on v3.15.0 is expected — should NOT produce a warning
+    expect(core.warning).not.toHaveBeenCalled();
+  });
 });
 
 describe('importPluginGpgKey', () => {

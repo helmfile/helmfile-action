@@ -34471,6 +34471,8 @@ async function resolveHelmV4PluginAssets(pluginUrl, version) {
                 lastError = error;
                 continue;
             }
+            // Request succeeded — clear any previous error from alternate tag formats
+            lastError = undefined;
             const assets = response.result?.assets || [];
             // Helm v4 plugin packages have companion .prov (provenance) files.
             // Platform-specific binaries (e.g., helm-diff-linux-amd64.tgz) do not.
