@@ -53,7 +53,10 @@ describe('installHelmPlugins', () => {
     // By default, return no v4 plugin assets (tests the legacy fallback path)
     mockGetJson.mockResolvedValue({result: {assets: []}});
     // Mock GPG key fetch
-    mockHttpGet.mockResolvedValue({readBody: async () => 'mock-gpg-key-data'});
+    mockHttpGet.mockResolvedValue({
+      message: {statusCode: 200},
+      readBody: async () => 'mock-gpg-key-data'
+    });
   });
 
   it('should install plugin without version', async () => {
@@ -62,8 +65,13 @@ describe('installHelmPlugins', () => {
     await installHelmPlugins(['https://github.com/databus23/helm-diff']);
 
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install --verify=false https://github.com/databus23/helm-diff',
-      [],
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/databus23/helm-diff'
+      ],
       expect.any(Object)
     );
     expect(mockCore.info).toHaveBeenCalledWith(
@@ -77,8 +85,15 @@ describe('installHelmPlugins', () => {
     await installHelmPlugins(['https://github.com/databus23/helm-diff@v3.1.3']);
 
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install --verify=false https://github.com/databus23/helm-diff --version v3.1.3',
-      [],
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/databus23/helm-diff',
+        '--version',
+        'v3.1.3'
+      ],
       expect.any(Object)
     );
     expect(mockCore.info).toHaveBeenCalledWith(
@@ -92,8 +107,15 @@ describe('installHelmPlugins', () => {
     await installHelmPlugins(['https://github.com/databus23/helm-diff@3.1.3']);
 
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install --verify=false https://github.com/databus23/helm-diff --version 3.1.3',
-      [],
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/databus23/helm-diff',
+        '--version',
+        '3.1.3'
+      ],
       expect.any(Object)
     );
     expect(mockCore.info).toHaveBeenCalledWith(
@@ -102,15 +124,8 @@ describe('installHelmPlugins', () => {
   });
 
   it('should handle plugin already exists', async () => {
-    const options = {
-      ignoreReturnCode: true,
-      listeners: {
-        stderr: expect.any(Function)
-      }
-    };
-
     mockExec
-      .mockImplementationOnce((command, args, opts) => {
+      .mockImplementationOnce((_command, _args, opts) => {
         // Simulate stderr output
         if (opts?.listeners?.stderr) {
           opts.listeners.stderr(Buffer.from('plugin already exists'));
@@ -132,8 +147,13 @@ describe('installHelmPlugins', () => {
     await installHelmPlugins(['https://github.com/user@domain.com/plugin']);
 
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install --verify=false https://github.com/user@domain.com/plugin',
-      [],
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/user@domain.com/plugin'
+      ],
       expect.any(Object)
     );
   });
@@ -148,18 +168,37 @@ describe('installHelmPlugins', () => {
     ]);
 
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install --verify=false https://github.com/databus23/helm-diff --version v3.1.3',
-      [],
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/databus23/helm-diff',
+        '--version',
+        'v3.1.3'
+      ],
       expect.any(Object)
     );
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install --verify=false https://github.com/jkroepke/helm-secrets',
-      [],
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/jkroepke/helm-secrets'
+      ],
       expect.any(Object)
     );
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install --verify=false https://github.com/chartmuseum/helm-push --version v0.10.1',
-      [],
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/chartmuseum/helm-push',
+        '--version',
+        'v0.10.1'
+      ],
       expect.any(Object)
     );
   });
@@ -176,8 +215,8 @@ describe('installHelmPlugins', () => {
     await installHelmPlugins(['https://github.com/databus23/helm-diff']);
 
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install https://github.com/databus23/helm-diff',
-      [],
+      'helm',
+      ['plugin', 'install', 'https://github.com/databus23/helm-diff'],
       expect.any(Object)
     );
   });
@@ -223,19 +262,27 @@ describe('installHelmPlugins', () => {
 
     // Should install from .tgz URLs, not the repo URL
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz',
-      [],
+      'helm',
+      [
+        'plugin',
+        'install',
+        'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz'
+      ],
       expect.any(Object)
     );
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-getter-4.7.1.tgz',
-      [],
+      'helm',
+      [
+        'plugin',
+        'install',
+        'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-getter-4.7.1.tgz'
+      ],
       expect.any(Object)
     );
-    // Should NOT use --verify=false or the repo URL
+    // Should NOT use --verify=false
     expect(mockExec).not.toHaveBeenCalledWith(
-      expect.stringContaining('--verify=false'),
-      [],
+      'helm',
+      expect.arrayContaining(['--verify=false']),
       expect.any(Object)
     );
     // Should import the plugin author's GPG key and export to legacy format
@@ -299,8 +346,13 @@ describe('installHelmPlugins', () => {
     );
     // Should retry with --verify=false
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install --verify=false https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz',
-      [],
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz'
+      ],
       expect.any(Object)
     );
     // Should report success (unverified)
@@ -320,8 +372,12 @@ describe('installHelmPlugins', () => {
     expect(mockGetJson).not.toHaveBeenCalled();
     // Should install the .tgz URL directly
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz',
-      [],
+      'helm',
+      [
+        'plugin',
+        'install',
+        'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz'
+      ],
       expect.any(Object)
     );
   });
@@ -345,8 +401,13 @@ describe('installHelmPlugins', () => {
 
     // Should fall back to legacy install with --verify=false
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install --verify=false https://github.com/databus23/helm-diff',
-      [],
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/databus23/helm-diff'
+      ],
       expect.any(Object)
     );
     expect(mockCore.info).toHaveBeenCalledWith(
@@ -367,8 +428,15 @@ describe('installHelmPlugins', () => {
 
     // Should fall back to legacy install with --verify=false
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install --verify=false https://github.com/jkroepke/helm-secrets --version v4.7.1',
-      [],
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/jkroepke/helm-secrets',
+        '--version',
+        'v4.7.1'
+      ],
       expect.any(Object)
     );
     expect(mockCore.warning).toHaveBeenCalledWith(
@@ -392,8 +460,14 @@ describe('installHelmPlugins', () => {
     expect(mockGetJson).not.toHaveBeenCalled();
     // Should install directly without --verify=false
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install https://github.com/jkroepke/helm-secrets --version v4.7.1',
-      [],
+      'helm',
+      [
+        'plugin',
+        'install',
+        'https://github.com/jkroepke/helm-secrets',
+        '--version',
+        'v4.7.1'
+      ],
       expect.any(Object)
     );
   });
@@ -573,6 +647,7 @@ describe('importPluginGpgKey', () => {
 
   it('should fetch and import GPG key from GitHub and export to legacy format', async () => {
     mockHttpGet.mockResolvedValueOnce({
+      message: {statusCode: 200},
       readBody: async () => 'pgp-key-data'
     });
     mockExec.mockResolvedValueOnce(0).mockResolvedValueOnce(0);
@@ -606,5 +681,20 @@ describe('importPluginGpgKey', () => {
     expect(mockCore.warning).toHaveBeenCalledWith(
       expect.stringContaining('Failed to import GPG key for unknown-user')
     );
+  });
+
+  it('should warn and skip import on non-200 HTTP response', async () => {
+    mockHttpGet.mockResolvedValueOnce({
+      message: {statusCode: 404},
+      readBody: async () => '<html>Not Found</html>'
+    });
+
+    await importPluginGpgKey('nonexistent-user');
+
+    expect(mockCore.warning).toHaveBeenCalledWith(
+      expect.stringContaining('HTTP 404')
+    );
+    // Should NOT attempt to import the HTML error page as a GPG key
+    expect(mockExec).not.toHaveBeenCalled();
   });
 });

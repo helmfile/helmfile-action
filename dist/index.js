@@ -34387,6 +34387,11 @@ async function importPluginGpgKey(owner) {
         info(`Importing GPG key for plugin verification from ${keyUrl}`);
         const httpClient = new lib_HttpClient('helmfile-action');
         const response = await httpClient.get(keyUrl);
+        const statusCode = response.message.statusCode ?? 0;
+        if (statusCode < 200 || statusCode >= 300) {
+            warning(`Failed to download GPG key for ${owner} from ${keyUrl}: HTTP ${statusCode}`);
+            return;
+        }
         const keyData = await response.readBody();
         await exec_exec('gpg', ['--import', '--batch'], {
             input: Buffer.from(keyData)
@@ -34531,7 +34536,7 @@ async function installHelmPlugins(plugins) {
                             }
                         }
                     };
-                    let eCode = await exec_exec(`helm plugin install ${assetUrl}`, [], assetOptions);
+                    let eCode = await exec_exec('helm', ['plugin', 'install', assetUrl], assetOptions);
                     if (eCode === 0) {
                         info(`Installed Helm v4 plugin from ${assetUrl}`);
                     }
@@ -34543,7 +34548,7 @@ async function installHelmPlugins(plugins) {
                         // --verify=false. The .tgz still registers as a proper v4 plugin.
                         warning(`Verification failed for ${assetUrl}, retrying with --verify=false`);
                         assetStderr = '';
-                        eCode = await exec_exec(`helm plugin install --verify=false ${assetUrl}`, [], assetOptions);
+                        eCode = await exec_exec('helm', ['plugin', 'install', '--verify=false', assetUrl], assetOptions);
                         if (eCode === 0) {
                             info(`Installed Helm v4 plugin from ${assetUrl} (unverified)`);
                         }
@@ -34561,7 +34566,6 @@ async function installHelmPlugins(plugins) {
             info(`No Helm v4 plugin packages found for ${pluginUrl}, using legacy install`);
         }
         // Legacy install: Helm v3, or Helm v4 fallback for plugins without .tgz packages
-        const verifyFlag = helmMajorVersion >= 4 ? '--verify=false ' : '';
         let pluginStderr = '';
         const options = {};
         options.ignoreReturnCode = true;
@@ -34570,11 +34574,15 @@ async function installHelmPlugins(plugins) {
                 pluginStderr += data.toString();
             }
         };
-        let installCommand = `helm plugin install ${verifyFlag}${pluginUrl}`;
-        if (version) {
-            installCommand += ` --version ${version}`;
+        const installArgs = ['plugin', 'install'];
+        if (helmMajorVersion >= 4) {
+            installArgs.push('--verify=false');
         }
-        const eCode = await exec_exec(installCommand, [], options);
+        installArgs.push(pluginUrl);
+        if (version) {
+            installArgs.push('--version', version);
+        }
+        const eCode = await exec_exec('helm', installArgs, options);
         if (eCode == 0) {
             const versionInfo = version ? ` (version ${version})` : '';
             info(`Plugin ${pluginUrl}${versionInfo} installed successfully`);

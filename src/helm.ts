@@ -40,6 +40,13 @@ export async function importPluginGpgKey(owner: string): Promise<void> {
     core.info(`Importing GPG key for plugin verification from ${keyUrl}`);
     const httpClient = new http.HttpClient('helmfile-action');
     const response = await httpClient.get(keyUrl);
+    const statusCode = response.message.statusCode ?? 0;
+    if (statusCode < 200 || statusCode >= 300) {
+      core.warning(
+        `Failed to download GPG key for ${owner} from ${keyUrl}: HTTP ${statusCode}`
+      );
+      return;
+    }
     const keyData = await response.readBody();
     await exec('gpg', ['--import', '--batch'], {
       input: Buffer.from(keyData)
@@ -220,8 +227,8 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
           };
 
           let eCode = await exec(
-            `helm plugin install ${assetUrl}`,
-            [],
+            'helm',
+            ['plugin', 'install', assetUrl],
             assetOptions
           );
 
@@ -237,8 +244,8 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
             );
             assetStderr = '';
             eCode = await exec(
-              `helm plugin install --verify=false ${assetUrl}`,
-              [],
+              'helm',
+              ['plugin', 'install', '--verify=false', assetUrl],
               assetOptions
             );
             if (eCode === 0) {
@@ -263,7 +270,6 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
     }
 
     // Legacy install: Helm v3, or Helm v4 fallback for plugins without .tgz packages
-    const verifyFlag = helmMajorVersion >= 4 ? '--verify=false ' : '';
     let pluginStderr = '';
 
     const options: ExecOptions = {};
@@ -274,12 +280,16 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
       }
     };
 
-    let installCommand = `helm plugin install ${verifyFlag}${pluginUrl}`;
+    const installArgs = ['plugin', 'install'];
+    if (helmMajorVersion >= 4) {
+      installArgs.push('--verify=false');
+    }
+    installArgs.push(pluginUrl);
     if (version) {
-      installCommand += ` --version ${version}`;
+      installArgs.push('--version', version);
     }
 
-    const eCode = await exec(installCommand, [], options);
+    const eCode = await exec('helm', installArgs, options);
 
     if (eCode == 0) {
       const versionInfo = version ? ` (version ${version})` : '';
