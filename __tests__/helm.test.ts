@@ -361,6 +361,55 @@ describe('installHelmPlugins', () => {
     );
   });
 
+  it('should throw without retry when .tgz install fails for non-verification reason', async () => {
+    // Mock GitHub API returning v4 plugin packages
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'secrets-4.7.1.tgz',
+            browser_download_url:
+              'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz'
+          },
+          {
+            name: 'secrets-4.7.1.tgz.prov',
+            browser_download_url:
+              'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz.prov'
+          }
+        ]
+      }
+    });
+
+    mockExec
+      // gpg --import
+      .mockResolvedValueOnce(0)
+      // gpg --export (pubring.gpg)
+      .mockResolvedValueOnce(0)
+      // Install attempt — non-verification failure (e.g., 404, corrupt archive)
+      .mockImplementationOnce((_command, _args, opts) => {
+        if (opts?.listeners?.stderr) {
+          opts.listeners.stderr(
+            Buffer.from('Error: unable to untar plugin: unexpected EOF')
+          );
+        }
+        return Promise.resolve(1);
+      });
+
+    await expect(
+      installHelmPlugins(['https://github.com/jkroepke/helm-secrets@v4.7.1'])
+    ).rejects.toThrow('unexpected EOF');
+
+    // Should NOT warn about verification failure or retry with --verify=false
+    expect(mockCore.warning).not.toHaveBeenCalledWith(
+      expect.stringContaining('Verification failed')
+    );
+    expect(mockExec).not.toHaveBeenCalledWith(
+      'helm',
+      expect.arrayContaining(['--verify=false']),
+      expect.any(Object)
+    );
+  });
+
   it('should install direct .tgz URL without querying GitHub API', async () => {
     mockExec.mockResolvedValue(0);
 

@@ -13,7 +13,24 @@ import {
   resolveLatest
 } from './helpers';
 
-const GITHUB_REPO_REGEX = /github\.com\/([^/]+)\/([^/]+)/;
+// Parse owner and repo from a GitHub URL using proper URL parsing.
+// Returns null for non-GitHub URLs or URLs without a valid owner/repo path.
+function parseGitHubRepo(
+  urlString: string
+): {owner: string; repo: string} | null {
+  try {
+    const url = new URL(urlString);
+    if (url.hostname !== 'github.com') return null;
+    const segments = url.pathname.split('/').filter(Boolean);
+    if (segments.length < 2) return null;
+    return {
+      owner: segments[0],
+      repo: segments[1].replace(/\.git$/, '')
+    };
+  } catch {
+    return null;
+  }
+}
 
 // Get the Helm major version (e.g., 3 or 4)
 async function getHelmMajorVersion(): Promise<number> {
@@ -77,11 +94,10 @@ export async function resolveHelmV4PluginAssets(
   pluginUrl: string,
   version: string
 ): Promise<string[]> {
-  const match = pluginUrl.match(GITHUB_REPO_REGEX);
-  if (!match) return [];
+  const parsed = parseGitHubRepo(pluginUrl);
+  if (!parsed) return [];
 
-  const owner = match[1];
-  const repo = match[2].replace(/\.git$/, '');
+  const {owner, repo} = parsed;
 
   try {
     const headers: Record<string, string> = {};
@@ -218,9 +234,9 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
           `Found ${v4Assets.length} Helm v4 plugin package(s) for ${pluginUrl}`
         );
         // Import the plugin author's GPG key for signature verification
-        const ownerMatch = pluginUrl.match(GITHUB_REPO_REGEX);
-        if (ownerMatch) {
-          await importPluginGpgKey(ownerMatch[1]);
+        const ownerParsed = parseGitHubRepo(pluginUrl);
+        if (ownerParsed) {
+          await importPluginGpgKey(ownerParsed.owner);
         }
         for (const assetUrl of v4Assets) {
           let assetStderr = '';
@@ -243,7 +259,11 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
             core.info(`Installed Helm v4 plugin from ${assetUrl}`);
           } else if (assetStderr.includes('plugin already exists')) {
             core.info(`Plugin from ${assetUrl} already exists`);
-          } else {
+          } else if (
+            assetStderr.includes('verification') ||
+            assetStderr.includes('pubring') ||
+            assetStderr.includes('openpgp')
+          ) {
             // Verification failed (e.g., GPG key missing/wrong) — retry with
             // --verify=false. The .tgz still registers as a proper v4 plugin.
             core.warning(
@@ -266,6 +286,10 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
                 `Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`
               );
             }
+          } else {
+            throw new Error(
+              `Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`
+            );
           }
         }
         continue;
