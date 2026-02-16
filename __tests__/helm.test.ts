@@ -241,13 +241,13 @@ describe('installHelmPlugins', () => {
     // Should import the plugin author's GPG key and export to legacy format
     expect(mockHttpGet).toHaveBeenCalledWith('https://github.com/jkroepke.gpg');
     expect(mockExec).toHaveBeenCalledWith(
-      'gpg --import --batch',
-      [],
+      'gpg',
+      ['--import', '--batch'],
       expect.objectContaining({input: expect.any(Buffer)})
     );
     expect(mockExec).toHaveBeenCalledWith(
-      expect.stringContaining('gpg --batch --yes --export --output'),
-      []
+      'gpg',
+      expect.arrayContaining(['--batch', '--yes', '--export', '--output'])
     );
   });
 
@@ -280,7 +280,10 @@ describe('installHelmPlugins', () => {
   });
 
   it('should fall back to legacy install when GitHub API fails on Helm v4', async () => {
-    mockGetJson.mockRejectedValueOnce(new Error('API rate limit'));
+    // Both tag candidates (v4.7.1 and 4.7.1) fail
+    mockGetJson
+      .mockRejectedValueOnce(new Error('API rate limit'))
+      .mockRejectedValueOnce(new Error('API rate limit'));
     mockExec.mockResolvedValue(0);
 
     await installHelmPlugins([
@@ -365,17 +368,30 @@ describe('resolveHelmV4PluginAssets', () => {
   });
 
   it('should return empty array when no .prov files exist', async () => {
-    mockGetJson.mockResolvedValueOnce({
-      result: {
-        assets: [
-          {
-            name: 'helm-diff-linux-amd64.tgz',
-            browser_download_url:
-              'https://example.com/helm-diff-linux-amd64.tgz'
-          }
-        ]
-      }
-    });
+    // Both tag candidates return only platform-specific archives (no .prov)
+    mockGetJson
+      .mockResolvedValueOnce({
+        result: {
+          assets: [
+            {
+              name: 'helm-diff-linux-amd64.tgz',
+              browser_download_url:
+                'https://example.com/helm-diff-linux-amd64.tgz'
+            }
+          ]
+        }
+      })
+      .mockResolvedValueOnce({
+        result: {
+          assets: [
+            {
+              name: 'helm-diff-linux-amd64.tgz',
+              browser_download_url:
+                'https://example.com/helm-diff-linux-amd64.tgz'
+            }
+          ]
+        }
+      });
 
     const result = await resolveHelmV4PluginAssets(
       'https://github.com/databus23/helm-diff',
@@ -406,9 +422,72 @@ describe('resolveHelmV4PluginAssets', () => {
       'v4.7.1'
     );
 
+    // Should try v-prefixed tag first
     expect(mockGetJson).toHaveBeenCalledWith(
       'https://api.github.com/repos/jkroepke/helm-secrets/releases/tags/v4.7.1'
     );
+  });
+
+  it('should try v-prefixed tag when version has no v prefix', async () => {
+    // First call (v4.7.1) succeeds with matching assets
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'secrets-4.7.1.tgz',
+            browser_download_url: 'https://example.com/secrets-4.7.1.tgz'
+          },
+          {
+            name: 'secrets-4.7.1.tgz.prov',
+            browser_download_url: 'https://example.com/secrets-4.7.1.tgz.prov'
+          }
+        ]
+      }
+    });
+
+    const result = await resolveHelmV4PluginAssets(
+      'https://github.com/jkroepke/helm-secrets',
+      '4.7.1'
+    );
+
+    // Should try v-prefixed tag first
+    expect(mockGetJson).toHaveBeenCalledWith(
+      'https://api.github.com/repos/jkroepke/helm-secrets/releases/tags/v4.7.1'
+    );
+    expect(result).toEqual(['https://example.com/secrets-4.7.1.tgz']);
+  });
+
+  it('should fall back to non-v tag when v-prefixed tag fails', async () => {
+    // First call (v1.0.0) fails
+    mockGetJson.mockRejectedValueOnce(new Error('Not Found'));
+    // Second call (1.0.0) succeeds
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'plugin-1.0.0.tgz',
+            browser_download_url: 'https://example.com/plugin-1.0.0.tgz'
+          },
+          {
+            name: 'plugin-1.0.0.tgz.prov',
+            browser_download_url: 'https://example.com/plugin-1.0.0.tgz.prov'
+          }
+        ]
+      }
+    });
+
+    const result = await resolveHelmV4PluginAssets(
+      'https://github.com/owner/plugin',
+      '1.0.0'
+    );
+
+    expect(mockGetJson).toHaveBeenCalledWith(
+      'https://api.github.com/repos/owner/plugin/releases/tags/v1.0.0'
+    );
+    expect(mockGetJson).toHaveBeenCalledWith(
+      'https://api.github.com/repos/owner/plugin/releases/tags/1.0.0'
+    );
+    expect(result).toEqual(['https://example.com/plugin-1.0.0.tgz']);
   });
 });
 
@@ -426,13 +505,21 @@ describe('importPluginGpgKey', () => {
     await importPluginGpgKey('jkroepke');
 
     expect(mockHttpGet).toHaveBeenCalledWith('https://github.com/jkroepke.gpg');
-    expect(mockExec).toHaveBeenCalledWith('gpg --import --batch', [], {
-      input: Buffer.from('pgp-key-data')
-    });
+    expect(mockExec).toHaveBeenCalledWith(
+      'gpg',
+      ['--import', '--batch'],
+      expect.objectContaining({input: Buffer.from('pgp-key-data')})
+    );
     // Should export keys to legacy pubring.gpg format for Helm v4
     expect(mockExec).toHaveBeenCalledWith(
-      expect.stringContaining('gpg --batch --yes --export --output'),
-      []
+      'gpg',
+      expect.arrayContaining([
+        '--batch',
+        '--yes',
+        '--export',
+        '--output',
+        expect.stringContaining('pubring.gpg')
+      ])
     );
   });
 

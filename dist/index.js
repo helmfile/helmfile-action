@@ -34388,14 +34388,20 @@ async function importPluginGpgKey(owner) {
         const httpClient = new lib_HttpClient('helmfile-action');
         const response = await httpClient.get(keyUrl);
         const keyData = await response.readBody();
-        await exec_exec('gpg --import --batch', [], {
+        await exec_exec('gpg', ['--import', '--batch'], {
             input: Buffer.from(keyData)
         });
         // Helm v4 reads pubring.gpg (GnuPG v1 format), but modern gpg stores
         // keys in pubring.kbx (v2 format). Export the keyring to the legacy file.
         const gnupgHome = process.env.GNUPGHOME || external_path_default().join(external_os_default().homedir(), '.gnupg');
         const pubringPath = external_path_default().join(gnupgHome, 'pubring.gpg');
-        await exec_exec(`gpg --batch --yes --export --output "${pubringPath}"`, []);
+        await exec_exec('gpg', [
+            '--batch',
+            '--yes',
+            '--export',
+            '--output',
+            pubringPath
+        ]);
     }
     catch (error) {
         warning(`Failed to import GPG key for ${owner}: ${error}`);
@@ -34416,20 +34422,45 @@ async function resolveHelmV4PluginAssets(pluginUrl, version) {
             headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
         }
         const httpClient = new lib_HttpClient('helmfile-action', [], { headers });
-        const releaseUrl = version
-            ? `https://api.github.com/repos/${owner}/${repo}/releases/tags/${version}`
-            : `https://api.github.com/repos/${owner}/${repo}/releases/latest`;
-        const response = await httpClient.getJson(releaseUrl);
-        const assets = response.result?.assets || [];
-        // Helm v4 plugin packages have companion .prov (provenance) files.
-        // Platform-specific binaries (e.g., helm-diff-linux-amd64.tgz) do not.
-        const provNames = new Set(assets
-            .filter(a => a.name.endsWith('.tgz.prov'))
-            .map(a => a.name.replace(/\.prov$/, '')));
-        const v4PluginUrls = assets
-            .filter(a => a.name.endsWith('.tgz') && provNames.has(a.name))
-            .map(a => a.browser_download_url);
-        return v4PluginUrls;
+        // Build candidate release URLs. When a version is specified, try both
+        // "vX.Y.Z" and "X.Y.Z" tag formats since repos may use either convention.
+        const releaseUrls = [];
+        if (version) {
+            const baseVersion = version.replace(/^v/, '');
+            releaseUrls.push(`https://api.github.com/repos/${owner}/${repo}/releases/tags/v${baseVersion}`);
+            releaseUrls.push(`https://api.github.com/repos/${owner}/${repo}/releases/tags/${baseVersion}`);
+        }
+        else {
+            releaseUrls.push(`https://api.github.com/repos/${owner}/${repo}/releases/latest`);
+        }
+        let lastError;
+        for (const releaseUrl of releaseUrls) {
+            let response;
+            try {
+                response = await httpClient.getJson(releaseUrl);
+            }
+            catch (error) {
+                // Tag not found — try next candidate
+                lastError = error;
+                continue;
+            }
+            const assets = response.result?.assets || [];
+            // Helm v4 plugin packages have companion .prov (provenance) files.
+            // Platform-specific binaries (e.g., helm-diff-linux-amd64.tgz) do not.
+            const provNames = new Set(assets
+                .filter(a => a.name.endsWith('.tgz.prov'))
+                .map(a => a.name.replace(/\.prov$/, '')));
+            const v4PluginUrls = assets
+                .filter(a => a.name.endsWith('.tgz') && provNames.has(a.name))
+                .map(a => a.browser_download_url);
+            if (v4PluginUrls.length > 0) {
+                return v4PluginUrls;
+            }
+        }
+        if (lastError) {
+            warning(`Failed to resolve Helm v4 plugin assets for ${pluginUrl}: ${lastError}`);
+        }
+        return [];
     }
     catch (error) {
         warning(`Failed to resolve Helm v4 plugin assets for ${pluginUrl}: ${error}`);
