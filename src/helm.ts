@@ -23,10 +23,14 @@ function parseGitHubRepo(
     if (url.hostname !== 'github.com') return null;
     const segments = url.pathname.split('/').filter(Boolean);
     if (segments.length < 2) return null;
-    return {
-      owner: segments[0],
-      repo: segments[1].replace(/\.git$/, '')
-    };
+    const owner = segments[0];
+    const repo = segments[1].replace(/\.git$/, '');
+    // Validate against GitHub's allowed characters to reject malformed URLs
+    if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(owner)) {
+      return null;
+    }
+    if (!/^[A-Za-z0-9._-]+$/.test(repo)) return null;
+    return {owner, repo};
   } catch {
     return null;
   }
