@@ -1,5 +1,8 @@
 import {jest} from '@jest/globals';
 
+const mockGetJson = jest.fn<any>();
+const mockHttpGet = jest.fn<any>();
+
 // Mock the dependencies BEFORE importing the code under test
 jest.unstable_mockModule('@actions/core', () => ({
   getInput: jest.fn(),
@@ -20,7 +23,15 @@ jest.unstable_mockModule('@actions/exec', () => ({
   getExecOutput: jest.fn()
 }));
 
-const {installHelmPlugins} = await import('../src/helm');
+jest.unstable_mockModule('@actions/http-client', () => ({
+  HttpClient: jest.fn().mockImplementation(() => ({
+    getJson: mockGetJson,
+    get: mockHttpGet
+  }))
+}));
+
+const {installHelmPlugins, resolveHelmV4PluginAssets, importPluginGpgKey} =
+  await import('../src/helm');
 const core = (await import('@actions/core')) as any;
 const {exec, getExecOutput} = await import('@actions/exec');
 
@@ -39,6 +50,13 @@ describe('installHelmPlugins', () => {
       stdout: 'v4.0.0+gc2a00e1',
       stderr: ''
     });
+    // By default, return no v4 plugin assets (tests the legacy fallback path)
+    mockGetJson.mockResolvedValue({result: {assets: []}});
+    // Mock GPG key fetch
+    mockHttpGet.mockResolvedValue({
+      message: {statusCode: 200},
+      readBody: async () => 'mock-gpg-key-data'
+    });
   });
 
   it('should install plugin without version', async () => {
@@ -47,8 +65,13 @@ describe('installHelmPlugins', () => {
     await installHelmPlugins(['https://github.com/databus23/helm-diff']);
 
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install --verify=false https://github.com/databus23/helm-diff',
-      [],
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/databus23/helm-diff'
+      ],
       expect.any(Object)
     );
     expect(mockCore.info).toHaveBeenCalledWith(
@@ -62,8 +85,15 @@ describe('installHelmPlugins', () => {
     await installHelmPlugins(['https://github.com/databus23/helm-diff@v3.1.3']);
 
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install --verify=false https://github.com/databus23/helm-diff --version v3.1.3',
-      [],
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/databus23/helm-diff',
+        '--version',
+        'v3.1.3'
+      ],
       expect.any(Object)
     );
     expect(mockCore.info).toHaveBeenCalledWith(
@@ -77,8 +107,15 @@ describe('installHelmPlugins', () => {
     await installHelmPlugins(['https://github.com/databus23/helm-diff@3.1.3']);
 
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install --verify=false https://github.com/databus23/helm-diff --version 3.1.3',
-      [],
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/databus23/helm-diff',
+        '--version',
+        '3.1.3'
+      ],
       expect.any(Object)
     );
     expect(mockCore.info).toHaveBeenCalledWith(
@@ -87,15 +124,8 @@ describe('installHelmPlugins', () => {
   });
 
   it('should handle plugin already exists', async () => {
-    const options = {
-      ignoreReturnCode: true,
-      listeners: {
-        stderr: expect.any(Function)
-      }
-    };
-
     mockExec
-      .mockImplementationOnce((command, args, opts) => {
+      .mockImplementationOnce((_command, _args, opts) => {
         // Simulate stderr output
         if (opts?.listeners?.stderr) {
           opts.listeners.stderr(Buffer.from('plugin already exists'));
@@ -117,8 +147,13 @@ describe('installHelmPlugins', () => {
     await installHelmPlugins(['https://github.com/user@domain.com/plugin']);
 
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install --verify=false https://github.com/user@domain.com/plugin',
-      [],
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/user@domain.com/plugin'
+      ],
       expect.any(Object)
     );
   });
@@ -133,18 +168,37 @@ describe('installHelmPlugins', () => {
     ]);
 
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install --verify=false https://github.com/databus23/helm-diff --version v3.1.3',
-      [],
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/databus23/helm-diff',
+        '--version',
+        'v3.1.3'
+      ],
       expect.any(Object)
     );
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install --verify=false https://github.com/jkroepke/helm-secrets',
-      [],
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/jkroepke/helm-secrets'
+      ],
       expect.any(Object)
     );
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install --verify=false https://github.com/chartmuseum/helm-push --version v0.10.1',
-      [],
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/chartmuseum/helm-push',
+        '--version',
+        'v0.10.1'
+      ],
       expect.any(Object)
     );
   });
@@ -161,9 +215,562 @@ describe('installHelmPlugins', () => {
     await installHelmPlugins(['https://github.com/databus23/helm-diff']);
 
     expect(mockExec).toHaveBeenCalledWith(
-      'helm plugin install https://github.com/databus23/helm-diff',
-      [],
+      'helm',
+      ['plugin', 'install', 'https://github.com/databus23/helm-diff'],
       expect.any(Object)
     );
+  });
+
+  it('should install from .tgz assets on Helm v4 when available', async () => {
+    // Mock GitHub API returning v4 plugin packages (with .prov companions)
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'helm-secrets.tar.gz',
+            browser_download_url:
+              'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/helm-secrets.tar.gz'
+          },
+          {
+            name: 'secrets-4.7.1.tgz',
+            browser_download_url:
+              'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz'
+          },
+          {
+            name: 'secrets-4.7.1.tgz.prov',
+            browser_download_url:
+              'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz.prov'
+          },
+          {
+            name: 'secrets-getter-4.7.1.tgz',
+            browser_download_url:
+              'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-getter-4.7.1.tgz'
+          },
+          {
+            name: 'secrets-getter-4.7.1.tgz.prov',
+            browser_download_url:
+              'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-getter-4.7.1.tgz.prov'
+          }
+        ]
+      }
+    });
+    mockExec.mockResolvedValue(0);
+
+    await installHelmPlugins([
+      'https://github.com/jkroepke/helm-secrets@v4.7.1'
+    ]);
+
+    // Should install from .tgz URLs, not the repo URL
+    expect(mockExec).toHaveBeenCalledWith(
+      'helm',
+      [
+        'plugin',
+        'install',
+        'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz'
+      ],
+      expect.any(Object)
+    );
+    expect(mockExec).toHaveBeenCalledWith(
+      'helm',
+      [
+        'plugin',
+        'install',
+        'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-getter-4.7.1.tgz'
+      ],
+      expect.any(Object)
+    );
+    // Should NOT use --verify=false
+    expect(mockExec).not.toHaveBeenCalledWith(
+      'helm',
+      expect.arrayContaining(['--verify=false']),
+      expect.any(Object)
+    );
+    // Should import the plugin author's GPG key and export to legacy format
+    expect(mockHttpGet).toHaveBeenCalledWith('https://github.com/jkroepke.gpg');
+    expect(mockExec).toHaveBeenCalledWith(
+      'gpg',
+      ['--import', '--batch'],
+      expect.objectContaining({input: expect.any(Buffer)})
+    );
+    expect(mockExec).toHaveBeenCalledWith(
+      'gpg',
+      expect.arrayContaining(['--batch', '--yes', '--export', '--output'])
+    );
+  });
+
+  it('should retry .tgz install with --verify=false when verification fails', async () => {
+    // Mock GitHub API returning v4 plugin packages
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'secrets-4.7.1.tgz',
+            browser_download_url:
+              'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz'
+          },
+          {
+            name: 'secrets-4.7.1.tgz.prov',
+            browser_download_url:
+              'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz.prov'
+          }
+        ]
+      }
+    });
+
+    mockExec
+      // gpg --import
+      .mockResolvedValueOnce(0)
+      // gpg --export (pubring.gpg)
+      .mockResolvedValueOnce(0)
+      // First install attempt — verification fails
+      .mockImplementationOnce((_command, _args, opts) => {
+        if (opts?.listeners?.stderr) {
+          opts.listeners.stderr(
+            Buffer.from('plugin verification failed: open pubring.gpg')
+          );
+        }
+        return Promise.resolve(1);
+      })
+      // Retry with --verify=false — succeeds
+      .mockResolvedValueOnce(0)
+      // helm plugin list
+      .mockResolvedValueOnce(0);
+
+    await installHelmPlugins([
+      'https://github.com/jkroepke/helm-secrets@v4.7.1'
+    ]);
+
+    // Should warn about verification failure
+    expect(mockCore.warning).toHaveBeenCalledWith(
+      expect.stringContaining('Verification failed')
+    );
+    // Should retry with --verify=false
+    expect(mockExec).toHaveBeenCalledWith(
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz'
+      ],
+      expect.any(Object)
+    );
+    // Should report success (unverified)
+    expect(mockCore.info).toHaveBeenCalledWith(
+      expect.stringContaining('unverified')
+    );
+  });
+
+  it('should throw without retry when .tgz install fails for non-verification reason', async () => {
+    // Mock GitHub API returning v4 plugin packages
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'secrets-4.7.1.tgz',
+            browser_download_url:
+              'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz'
+          },
+          {
+            name: 'secrets-4.7.1.tgz.prov',
+            browser_download_url:
+              'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz.prov'
+          }
+        ]
+      }
+    });
+
+    mockExec
+      // gpg --import
+      .mockResolvedValueOnce(0)
+      // gpg --export (pubring.gpg)
+      .mockResolvedValueOnce(0)
+      // Install attempt — non-verification failure (e.g., 404, corrupt archive)
+      .mockImplementationOnce((_command, _args, opts) => {
+        if (opts?.listeners?.stderr) {
+          opts.listeners.stderr(
+            Buffer.from('Error: unable to untar plugin: unexpected EOF')
+          );
+        }
+        return Promise.resolve(1);
+      });
+
+    await expect(
+      installHelmPlugins(['https://github.com/jkroepke/helm-secrets@v4.7.1'])
+    ).rejects.toThrow('unexpected EOF');
+
+    // Should NOT warn about verification failure or retry with --verify=false
+    expect(mockCore.warning).not.toHaveBeenCalledWith(
+      expect.stringContaining('Verification failed')
+    );
+    expect(mockExec).not.toHaveBeenCalledWith(
+      'helm',
+      expect.arrayContaining(['--verify=false']),
+      expect.any(Object)
+    );
+  });
+
+  it('should install direct .tgz URL without querying GitHub API', async () => {
+    mockExec.mockResolvedValue(0);
+
+    await installHelmPlugins([
+      'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz'
+    ]);
+
+    // Should NOT query the GitHub releases API
+    expect(mockGetJson).not.toHaveBeenCalled();
+    // Should install the .tgz URL directly
+    expect(mockExec).toHaveBeenCalledWith(
+      'helm',
+      [
+        'plugin',
+        'install',
+        'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz'
+      ],
+      expect.any(Object)
+    );
+  });
+
+  it('should fall back to legacy install when no .tgz assets found on Helm v4', async () => {
+    // Mock GitHub API returning only platform-specific archives (no .prov files)
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'helm-diff-linux-amd64.tgz',
+            browser_download_url:
+              'https://github.com/databus23/helm-diff/releases/download/v3.15.0/helm-diff-linux-amd64.tgz'
+          }
+        ]
+      }
+    });
+    mockExec.mockResolvedValue(0);
+
+    await installHelmPlugins(['https://github.com/databus23/helm-diff']);
+
+    // Should fall back to legacy install with --verify=false
+    expect(mockExec).toHaveBeenCalledWith(
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/databus23/helm-diff'
+      ],
+      expect.any(Object)
+    );
+    expect(mockCore.info).toHaveBeenCalledWith(
+      'No Helm v4 plugin packages found for https://github.com/databus23/helm-diff, using legacy install'
+    );
+  });
+
+  it('should fall back to legacy install when GitHub API fails on Helm v4', async () => {
+    // Both tag candidates (v4.7.1 and 4.7.1) fail
+    mockGetJson
+      .mockRejectedValueOnce(new Error('API rate limit'))
+      .mockRejectedValueOnce(new Error('API rate limit'));
+    mockExec.mockResolvedValue(0);
+
+    await installHelmPlugins([
+      'https://github.com/jkroepke/helm-secrets@v4.7.1'
+    ]);
+
+    // Should fall back to legacy install with --verify=false
+    expect(mockExec).toHaveBeenCalledWith(
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/jkroepke/helm-secrets',
+        '--version',
+        'v4.7.1'
+      ],
+      expect.any(Object)
+    );
+    expect(mockCore.warning).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to resolve Helm v4 plugin assets')
+    );
+  });
+
+  it('should not query GitHub API for Helm v3', async () => {
+    mockGetExecOutput.mockResolvedValueOnce({
+      exitCode: 0,
+      stdout: 'v3.17.3+gc2a00e1',
+      stderr: ''
+    });
+    mockExec.mockResolvedValue(0);
+
+    await installHelmPlugins([
+      'https://github.com/jkroepke/helm-secrets@v4.7.1'
+    ]);
+
+    // Should NOT call the GitHub API
+    expect(mockGetJson).not.toHaveBeenCalled();
+    // Should install directly without --verify=false
+    expect(mockExec).toHaveBeenCalledWith(
+      'helm',
+      [
+        'plugin',
+        'install',
+        'https://github.com/jkroepke/helm-secrets',
+        '--version',
+        'v4.7.1'
+      ],
+      expect.any(Object)
+    );
+  });
+});
+
+describe('resolveHelmV4PluginAssets', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('should return .tgz URLs that have .prov companions', async () => {
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'secrets-4.7.1.tgz',
+            browser_download_url: 'https://example.com/secrets-4.7.1.tgz'
+          },
+          {
+            name: 'secrets-4.7.1.tgz.prov',
+            browser_download_url: 'https://example.com/secrets-4.7.1.tgz.prov'
+          },
+          {
+            name: 'helm-secrets.tar.gz',
+            browser_download_url: 'https://example.com/helm-secrets.tar.gz'
+          }
+        ]
+      }
+    });
+
+    const result = await resolveHelmV4PluginAssets(
+      'https://github.com/jkroepke/helm-secrets',
+      'v4.7.1'
+    );
+
+    expect(result).toEqual(['https://example.com/secrets-4.7.1.tgz']);
+  });
+
+  it('should return empty array for non-GitHub URLs', async () => {
+    const result = await resolveHelmV4PluginAssets(
+      'https://example.com/my-plugin',
+      'v1.0.0'
+    );
+
+    expect(result).toEqual([]);
+    expect(mockGetJson).not.toHaveBeenCalled();
+  });
+
+  it('should return empty array when no .prov files exist', async () => {
+    // Both tag candidates return only platform-specific archives (no .prov)
+    mockGetJson
+      .mockResolvedValueOnce({
+        result: {
+          assets: [
+            {
+              name: 'helm-diff-linux-amd64.tgz',
+              browser_download_url:
+                'https://example.com/helm-diff-linux-amd64.tgz'
+            }
+          ]
+        }
+      })
+      .mockResolvedValueOnce({
+        result: {
+          assets: [
+            {
+              name: 'helm-diff-linux-amd64.tgz',
+              browser_download_url:
+                'https://example.com/helm-diff-linux-amd64.tgz'
+            }
+          ]
+        }
+      });
+
+    const result = await resolveHelmV4PluginAssets(
+      'https://github.com/databus23/helm-diff',
+      'v3.15.0'
+    );
+
+    expect(result).toEqual([]);
+  });
+
+  it('should use latest release URL when no version specified', async () => {
+    mockGetJson.mockResolvedValueOnce({result: {assets: []}});
+
+    await resolveHelmV4PluginAssets(
+      'https://github.com/jkroepke/helm-secrets',
+      ''
+    );
+
+    expect(mockGetJson).toHaveBeenCalledWith(
+      'https://api.github.com/repos/jkroepke/helm-secrets/releases/latest'
+    );
+  });
+
+  it('should use tagged release URL when version specified', async () => {
+    mockGetJson.mockResolvedValueOnce({result: {assets: []}});
+
+    await resolveHelmV4PluginAssets(
+      'https://github.com/jkroepke/helm-secrets',
+      'v4.7.1'
+    );
+
+    // Should try v-prefixed tag first
+    expect(mockGetJson).toHaveBeenCalledWith(
+      'https://api.github.com/repos/jkroepke/helm-secrets/releases/tags/v4.7.1'
+    );
+  });
+
+  it('should try v-prefixed tag when version has no v prefix', async () => {
+    // First call (v4.7.1) succeeds with matching assets
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'secrets-4.7.1.tgz',
+            browser_download_url: 'https://example.com/secrets-4.7.1.tgz'
+          },
+          {
+            name: 'secrets-4.7.1.tgz.prov',
+            browser_download_url: 'https://example.com/secrets-4.7.1.tgz.prov'
+          }
+        ]
+      }
+    });
+
+    const result = await resolveHelmV4PluginAssets(
+      'https://github.com/jkroepke/helm-secrets',
+      '4.7.1'
+    );
+
+    // Should try v-prefixed tag first
+    expect(mockGetJson).toHaveBeenCalledWith(
+      'https://api.github.com/repos/jkroepke/helm-secrets/releases/tags/v4.7.1'
+    );
+    expect(result).toEqual(['https://example.com/secrets-4.7.1.tgz']);
+  });
+
+  it('should fall back to non-v tag when v-prefixed tag fails', async () => {
+    // First call (v1.0.0) fails
+    mockGetJson.mockRejectedValueOnce(new Error('Not Found'));
+    // Second call (1.0.0) succeeds
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'plugin-1.0.0.tgz',
+            browser_download_url: 'https://example.com/plugin-1.0.0.tgz'
+          },
+          {
+            name: 'plugin-1.0.0.tgz.prov',
+            browser_download_url: 'https://example.com/plugin-1.0.0.tgz.prov'
+          }
+        ]
+      }
+    });
+
+    const result = await resolveHelmV4PluginAssets(
+      'https://github.com/owner/plugin',
+      '1.0.0'
+    );
+
+    expect(mockGetJson).toHaveBeenCalledWith(
+      'https://api.github.com/repos/owner/plugin/releases/tags/v1.0.0'
+    );
+    expect(mockGetJson).toHaveBeenCalledWith(
+      'https://api.github.com/repos/owner/plugin/releases/tags/1.0.0'
+    );
+    expect(result).toEqual(['https://example.com/plugin-1.0.0.tgz']);
+  });
+
+  it('should not warn when first tag 404s but second tag succeeds with no v4 assets', async () => {
+    const core = (await import('@actions/core')) as any;
+    // First call (v3.15.0) — 404
+    mockGetJson.mockRejectedValueOnce(new Error('Not Found'));
+    // Second call (3.15.0) — succeeds but no .prov companions
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'helm-diff-linux-amd64.tgz',
+            browser_download_url:
+              'https://example.com/helm-diff-linux-amd64.tgz'
+          }
+        ]
+      }
+    });
+
+    const result = await resolveHelmV4PluginAssets(
+      'https://github.com/databus23/helm-diff',
+      '3.15.0'
+    );
+
+    expect(result).toEqual([]);
+    // The 404 on v3.15.0 is expected — should NOT produce a warning
+    expect(core.warning).not.toHaveBeenCalled();
+  });
+});
+
+describe('importPluginGpgKey', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('should fetch and import GPG key from GitHub and export to legacy format', async () => {
+    mockHttpGet.mockResolvedValueOnce({
+      message: {statusCode: 200},
+      readBody: async () => 'pgp-key-data'
+    });
+    mockExec.mockResolvedValueOnce(0).mockResolvedValueOnce(0);
+
+    await importPluginGpgKey('jkroepke');
+
+    expect(mockHttpGet).toHaveBeenCalledWith('https://github.com/jkroepke.gpg');
+    expect(mockExec).toHaveBeenCalledWith(
+      'gpg',
+      ['--import', '--batch'],
+      expect.objectContaining({input: Buffer.from('pgp-key-data')})
+    );
+    // Should export keys to legacy pubring.gpg format for Helm v4
+    expect(mockExec).toHaveBeenCalledWith(
+      'gpg',
+      expect.arrayContaining([
+        '--batch',
+        '--yes',
+        '--export',
+        '--output',
+        expect.stringContaining('pubring.gpg')
+      ])
+    );
+  });
+
+  it('should warn and not throw when GPG import fails', async () => {
+    mockHttpGet.mockRejectedValueOnce(new Error('network error'));
+
+    await importPluginGpgKey('unknown-user');
+
+    expect(mockCore.warning).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to import GPG key for unknown-user')
+    );
+  });
+
+  it('should warn and skip import on non-200 HTTP response', async () => {
+    mockHttpGet.mockResolvedValueOnce({
+      message: {statusCode: 404},
+      readBody: async () => '<html>Not Found</html>'
+    });
+
+    await importPluginGpgKey('nonexistent-user');
+
+    expect(mockCore.warning).toHaveBeenCalledWith(
+      expect.stringContaining('HTTP 404')
+    );
+    // Should NOT attempt to import the HTML error page as a GPG key
+    expect(mockExec).not.toHaveBeenCalled();
   });
 });
