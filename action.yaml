@@ -41,5 +41,5 @@ outputs:
   helmfile-stderr:
     description: 'Error output of helmfile command'
 runs:
-  using: 'node20'
+  using: 'node24'
   main: 'dist/index.js'
