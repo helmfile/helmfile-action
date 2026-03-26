@@ -8,12 +8,15 @@ export default {
   testMatch: ['**/*.test.ts'],
   transform: {
     '^.+\\.tsx?$': [
-      'ts-jest',
+      '@swc/jest',
       {
-        useESM: true,
-        tsconfig: {
-          allowSyntheticDefaultImports: true,
-          esModuleInterop: true
+        jsc: {
+          parser: {
+            syntax: 'typescript'
+          }
+        },
+        module: {
+          type: 'es6'
         }
       }
     ]
