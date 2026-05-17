@@ -5,6 +5,10 @@ import {installHelmfile, HelmfileInit} from './helmfile';
 import * as fs from 'fs';
 
 async function run(): Promise<void> {
+  let processExitCode = 0;
+  let helmfileStdout = '';
+  let helmfileStderr = '';
+
   try {
     const helmfileArgs = core.getInput('helmfile-args');
     const helmfileVersion = core.getInput('helmfile-version');
@@ -53,10 +57,8 @@ async function run(): Promise<void> {
       core.endGroup();
     }
 
-    // Add support for helmfile-kubeconfig-context
     if (helmfileKubeconfigContext.length > 0) {
       core.startGroup('Set helmfile-kubeconfig-context');
-      // make sure the kubeconfig dir exists
       const mkdirExitcode = await exec.exec('mkdir -p ~/.kube', [], {
         ignoreReturnCode: true
       });
@@ -66,7 +68,6 @@ async function run(): Promise<void> {
         );
       }
 
-      // write helmfileKubeconfigContext to the ~/.kube/config file
       const helmfileKubeconfigContextFile = `${process.env.HOME}/.kube/config`;
       fs.promises.writeFile(
         helmfileKubeconfigContextFile,
@@ -79,36 +80,21 @@ async function run(): Promise<void> {
     if (helmfileWorkDirectory != '') {
       options.cwd = helmfileWorkDirectory;
     }
-
-    let helmfileStdout = '';
-    let helmfileStderr = '';
-
-    options.listeners = {
-      stdout: (data: Buffer) => {
-        helmfileStdout += data.toString();
-      },
-      stderr: (data: Buffer) => {
-        helmfileStderr += data.toString();
-      }
-    };
-
     options.ignoreReturnCode = true;
-
-    // set HELM_DIFF_COLOR=true into the helmfile command's environment
     options.env = {
       HELM_DIFF_COLOR: helmDiffColor,
       ...process.env
     };
 
-    const processExitCode = await exec.exec(
+    const result = await exec.getExecOutput(
       `helmfile ${helmfileArgs}`,
       [],
       options
     );
 
-    core.setOutput('exit-code', processExitCode);
-    core.setOutput('helmfile-stdout', helmfileStdout);
-    core.setOutput('helmfile-stderr', helmfileStderr);
+    processExitCode = result.exitCode;
+    helmfileStdout = result.stdout;
+    helmfileStderr = result.stderr;
 
     if (processExitCode !== 0 && processExitCode !== 2) {
       throw new Error(
@@ -117,6 +103,10 @@ async function run(): Promise<void> {
     }
   } catch (error) {
     if (error instanceof Error) core.setFailed(error.message);
+  } finally {
+    core.setOutput('exit-code', processExitCode);
+    core.setOutput('helmfile-stdout', helmfileStdout);
+    core.setOutput('helmfile-stderr', helmfileStderr);
   }
 }
 
