@@ -34534,19 +34534,25 @@ const ARCH_ALIASES = {
     arm64: ['arm64', 'aarch64'],
     arm: ['armv6', 'armv7', 'arm']
 };
+function escapeRegex(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+function buildAssetTokenRegex(patterns) {
+    return new RegExp(`(?:^|[._-])(?:${patterns.map(escapeRegex).join('|')})(?=$|[._-])`, 'i');
+}
 function filterPlatformAsset(assets, runnerPlatform, runnerArch) {
-    const p = runnerPlatform ?? (os.platform() === 'win32' ? 'windows' : os.platform());
+    const p = runnerPlatform ?? (external_os_default().platform() === 'win32' ? 'windows' : external_os_default().platform());
     const a = runnerArch
         ? runnerArch === 'x64'
             ? 'amd64'
             : runnerArch
-        : os.arch() === 'x64'
+        : external_os_default().arch() === 'x64'
             ? 'amd64'
-            : os.arch();
+            : external_os_default().arch();
     const platformPatterns = PLATFORM_ALIASES[p] || [p];
     const archPatterns = ARCH_ALIASES[a] || [a];
-    const platformRegex = new RegExp(`(?:${platformPatterns.join('|')})`, 'i');
-    const archRegex = new RegExp(`(?:${archPatterns.join('|')})`, 'i');
+    const platformRegex = buildAssetTokenRegex(platformPatterns);
+    const archRegex = buildAssetTokenRegex(archPatterns);
     const matched = assets.filter(asset => {
         const baseName = asset.name.replace(/\.tgz$/i, '');
         return platformRegex.test(baseName) && archRegex.test(baseName);
@@ -34602,19 +34608,7 @@ async function resolveHelmV4PluginAssets(pluginUrl, version) {
                 .map(a => a.name.replace(/\.prov$/, '')));
             const v4PluginAssets = assets.filter(a => a.name.endsWith('.tgz') && provNames.has(a.name));
             if (v4PluginAssets.length > 0) {
-                // Per-platform binary archives (e.g. helm-diff-linux-amd64.tgz) are not
-                // proper Helm v4 plugin packages — they install to the wrong directory
-                // name and cause plugin conflicts. Detect them by OS+arch in filenames
-                // and skip the v4 path so the legacy git repo install is used instead.
-                const osPattern = /(?:linux|macos|darwin|windows|freebsd|netbsd|openbsd)/i;
-                const archPattern = /(?:amd64|arm64|armv[67]|ppc64le|s390x|x86_64|aarch64)/i;
-                const hasPlatformBinaries = v4PluginAssets.some(a => osPattern.test(a.name) && archPattern.test(a.name));
-                if (hasPlatformBinaries) {
-                    info(`Detected per-platform binary archives for ${pluginUrl}, skipping v4 path`);
-                }
-                else {
-                    return v4PluginAssets.map(a => a.browser_download_url);
-                }
+                return filterPlatformAsset(v4PluginAssets).map(a => a.browser_download_url);
             }
         }
         if (lastError) {
