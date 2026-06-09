@@ -477,10 +477,13 @@ describe('installHelmPlugins', () => {
       'https://github.com/databus23/helm-diff@v3.15.8'
     ]);
 
-    expect(mockRm).toHaveBeenCalledWith('/tmp/helm/plugins/helm-diff-linux-amd64', {
-      recursive: true,
-      force: true
-    });
+    expect(mockRm).toHaveBeenCalledWith(
+      '/tmp/helm/plugins/helm-diff-linux-amd64',
+      {
+        recursive: true,
+        force: true
+      }
+    );
     expect(mockExec).toHaveBeenCalledWith(
       'helm',
       [

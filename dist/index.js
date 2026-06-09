@@ -33606,6 +33606,8 @@ function getIDToken(aud) {
  */
 
 //# sourceMappingURL=core.js.map
+;// CONCATENATED MODULE: external "fs/promises"
+const promises_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("fs/promises");
 // EXTERNAL MODULE: ./node_modules/@actions/tool-cache/node_modules/semver/index.js
 var node_modules_semver = __nccwpck_require__(885);
 ;// CONCATENATED MODULE: ./node_modules/@actions/tool-cache/lib/manifest.js
@@ -34448,6 +34450,7 @@ async function helpers_cacheDir(path, tool, version) {
 
 
 
+
 // Parse owner and repo from a GitHub URL using proper URL parsing.
 // Returns null for non-GitHub URLs or URLs without a valid owner/repo path.
 function parseGitHubRepo(urlString) {
@@ -34523,6 +34526,39 @@ async function importPluginGpgKey(owner) {
     catch (error) {
         warning(`Failed to import GPG key for ${owner}: ${error}`);
     }
+}
+async function getHelmPluginsDir() {
+    const pluginsDir = process.env.HELM_PLUGINS?.trim();
+    if (pluginsDir)
+        return pluginsDir;
+    try {
+        const output = await getExecOutput('helm', ['env', 'HELM_PLUGINS'], {
+            silent: true
+        });
+        return output.stdout.trim().replace(/^"(.*)"$/, '$1') || null;
+    }
+    catch (error) {
+        warning(`Failed to determine Helm plugin directory: ${error}`);
+        return null;
+    }
+}
+async function cleanupPartialPluginInstall(assetUrl) {
+    const pluginsDir = await getHelmPluginsDir();
+    if (!pluginsDir)
+        return;
+    let assetName = '';
+    try {
+        assetName = decodeURIComponent(external_path_default().basename(new URL(assetUrl).pathname));
+    }
+    catch {
+        assetName = assetUrl.split('/').pop() ?? '';
+    }
+    if (!assetName.toLowerCase().endsWith('.tgz'))
+        return;
+    await promises_namespaceObject.rm(external_path_default().join(pluginsDir, assetName.replace(/\.tgz$/i, '')), {
+        recursive: true,
+        force: true
+    });
 }
 const PLATFORM_ALIASES = {
     linux: ['linux'],
@@ -34701,6 +34737,7 @@ async function installHelmPlugins(plugins) {
                         // Verification failed (e.g., GPG key missing/wrong) — retry with
                         // --verify=false. The .tgz still registers as a proper v4 plugin.
                         warning(`Verification failed for ${assetUrl}, retrying with --verify=false`);
+                        await cleanupPartialPluginInstall(assetUrl);
                         assetStderr = '';
                         eCode = await exec_exec('helm', ['plugin', 'install', '--verify=false', assetUrl], assetOptions);
                         if (eCode === 0) {
@@ -34712,10 +34749,12 @@ async function installHelmPlugins(plugins) {
                             installed = true;
                         }
                         else {
+                            await cleanupPartialPluginInstall(assetUrl);
                             warning(`Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`);
                         }
                     }
                     else {
+                        await cleanupPartialPluginInstall(assetUrl);
                         warning(`Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`);
                     }
                 }
