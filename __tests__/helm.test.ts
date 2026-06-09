@@ -1,7 +1,10 @@
 import {jest} from '@jest/globals';
+import os from 'os';
+import path from 'path';
 
 const mockGetJson = jest.fn<any>();
 const mockHttpGet = jest.fn<any>();
+const mockRm = jest.fn<any>();
 
 // Mock the dependencies BEFORE importing the code under test
 jest.unstable_mockModule('@actions/core', () => ({
@@ -30,8 +33,16 @@ jest.unstable_mockModule('@actions/http-client', () => ({
   }))
 }));
 
-const {installHelmPlugins, resolveHelmV4PluginAssets, importPluginGpgKey} =
-  await import('../src/helm');
+jest.unstable_mockModule('fs/promises', () => ({
+  rm: mockRm
+}));
+
+const {
+  installHelmPlugins,
+  resolveHelmV4PluginAssets,
+  importPluginGpgKey,
+  filterPlatformAsset
+} = await import('../src/helm');
 const core = (await import('@actions/core')) as any;
 const {exec, getExecOutput} = await import('@actions/exec');
 
@@ -44,6 +55,7 @@ const mockGetExecOutput = getExecOutput as jest.MockedFunction<
 describe('installHelmPlugins', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    delete process.env.HELM_PLUGINS;
     // Mock Helm v4 version output so --verify=false flag is added
     mockGetExecOutput.mockResolvedValue({
       exitCode: 0,
@@ -270,7 +282,7 @@ describe('installHelmPlugins', () => {
       ],
       expect.any(Object)
     );
-    expect(mockExec).toHaveBeenCalledWith(
+    expect(mockExec).not.toHaveBeenCalledWith(
       'helm',
       [
         'plugin',
@@ -361,8 +373,7 @@ describe('installHelmPlugins', () => {
     );
   });
 
-  it('should throw without retry when .tgz install fails for non-verification reason', async () => {
-    // Mock GitHub API returning v4 plugin packages
+  it('should fall back to legacy install when .tgz install fails for non-verification reason', async () => {
     mockGetJson.mockResolvedValueOnce({
       result: {
         assets: [
@@ -385,7 +396,7 @@ describe('installHelmPlugins', () => {
       .mockResolvedValueOnce(0)
       // gpg --export (pubring.gpg)
       .mockResolvedValueOnce(0)
-      // Install attempt — non-verification failure (e.g., 404, corrupt archive)
+      // .tgz install attempt — non-verification failure
       .mockImplementationOnce((_command, _args, opts) => {
         if (opts?.listeners?.stderr) {
           opts.listeners.stderr(
@@ -393,19 +404,219 @@ describe('installHelmPlugins', () => {
           );
         }
         return Promise.resolve(1);
-      });
+      })
+      // legacy install succeeds
+      .mockResolvedValueOnce(0)
+      // helm plugin list
+      .mockResolvedValueOnce(0);
 
-    await expect(
-      installHelmPlugins(['https://github.com/jkroepke/helm-secrets@v4.7.1'])
-    ).rejects.toThrow('unexpected EOF');
+    await installHelmPlugins([
+      'https://github.com/jkroepke/helm-secrets@v4.7.1'
+    ]);
 
-    // Should NOT warn about verification failure or retry with --verify=false
-    expect(mockCore.warning).not.toHaveBeenCalledWith(
-      expect.stringContaining('Verification failed')
+    expect(mockCore.warning).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to install Helm v4 plugin')
+    );
+    expect(mockCore.info).toHaveBeenCalledWith(
+      expect.stringContaining('falling back to legacy install')
+    );
+    expect(mockExec).toHaveBeenCalledWith(
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/jkroepke/helm-secrets',
+        '--version',
+        'v4.7.1'
+      ],
+      expect.any(Object)
+    );
+  });
+
+  it('should remove the partial .tgz install before falling back to the legacy install', async () => {
+    process.env.HELM_PLUGINS = '/tmp/helm/plugins';
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'helm-diff-linux-amd64.tgz',
+            browser_download_url:
+              'https://github.com/databus23/helm-diff/releases/download/v3.15.8/helm-diff-linux-amd64.tgz'
+          },
+          {
+            name: 'helm-diff-linux-amd64.tgz.prov',
+            browser_download_url:
+              'https://github.com/databus23/helm-diff/releases/download/v3.15.8/helm-diff-linux-amd64.tgz.prov'
+          }
+        ]
+      }
+    });
+
+    mockExec
+      // gpg --import
+      .mockResolvedValueOnce(0)
+      // gpg --export (pubring.gpg)
+      .mockResolvedValueOnce(0)
+      // .tgz install attempt — partial install left behind
+      .mockImplementationOnce((_command, _args, opts) => {
+        if (opts?.listeners?.stderr) {
+          opts.listeners.stderr(
+            Buffer.from(
+              'Error: fork/exec /tmp/helm/plugins/helm-diff-linux-amd64/install-binary.sh: no such file or directory'
+            )
+          );
+        }
+        return Promise.resolve(1);
+      })
+      // legacy install succeeds
+      .mockResolvedValueOnce(0)
+      // helm plugin list
+      .mockResolvedValueOnce(0);
+
+    await installHelmPlugins([
+      'https://github.com/databus23/helm-diff@v3.15.8'
+    ]);
+
+    expect(mockRm).toHaveBeenCalledWith(
+      path.join('/tmp/helm/plugins', 'helm-diff-linux-amd64'),
+      {
+        recursive: true,
+        force: true
+      }
+    );
+    expect(mockExec).toHaveBeenCalledWith(
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/databus23/helm-diff',
+        '--version',
+        'v3.15.8'
+      ],
+      expect.any(Object)
+    );
+  });
+
+  it('should stop installing additional .tgz assets after first successful install', async () => {
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'secrets-4.7.1.tgz',
+            browser_download_url:
+              'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz'
+          },
+          {
+            name: 'secrets-4.7.1.tgz.prov',
+            browser_download_url:
+              'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz.prov'
+          },
+          {
+            name: 'secrets-alt-4.7.1.tgz',
+            browser_download_url:
+              'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-alt-4.7.1.tgz'
+          },
+          {
+            name: 'secrets-alt-4.7.1.tgz.prov',
+            browser_download_url:
+              'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-alt-4.7.1.tgz.prov'
+          }
+        ]
+      }
+    });
+
+    mockExec
+      // gpg --import
+      .mockResolvedValueOnce(0)
+      // gpg --export (pubring.gpg)
+      .mockResolvedValueOnce(0)
+      // first .tgz install succeeds
+      .mockResolvedValueOnce(0)
+      // helm plugin list
+      .mockResolvedValueOnce(0);
+
+    await installHelmPlugins([
+      'https://github.com/jkroepke/helm-secrets@v4.7.1'
+    ]);
+
+    expect(mockExec).toHaveBeenCalledWith(
+      'helm',
+      [
+        'plugin',
+        'install',
+        'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz'
+      ],
+      expect.any(Object)
     );
     expect(mockExec).not.toHaveBeenCalledWith(
       'helm',
-      expect.arrayContaining(['--verify=false']),
+      [
+        'plugin',
+        'install',
+        'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-alt-4.7.1.tgz'
+      ],
+      expect.any(Object)
+    );
+  });
+
+  it('should continue to legacy fallback when cleanup of partial install fails', async () => {
+    process.env.HELM_PLUGINS = '/tmp/helm/plugins';
+    mockRm.mockRejectedValueOnce(new Error('EPERM'));
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'helm-diff-linux-amd64.tgz',
+            browser_download_url:
+              'https://github.com/databus23/helm-diff/releases/download/v3.15.8/helm-diff-linux-amd64.tgz'
+          },
+          {
+            name: 'helm-diff-linux-amd64.tgz.prov',
+            browser_download_url:
+              'https://github.com/databus23/helm-diff/releases/download/v3.15.8/helm-diff-linux-amd64.tgz.prov'
+          }
+        ]
+      }
+    });
+
+    mockExec
+      // gpg --import
+      .mockResolvedValueOnce(0)
+      // gpg --export (pubring.gpg)
+      .mockResolvedValueOnce(0)
+      // .tgz install fails so cleanup runs and fails
+      .mockImplementationOnce((_command, _args, opts) => {
+        if (opts?.listeners?.stderr) {
+          opts.listeners.stderr(Buffer.from('Error: unable to untar plugin'));
+        }
+        return Promise.resolve(1);
+      })
+      // legacy install succeeds
+      .mockResolvedValueOnce(0)
+      // helm plugin list
+      .mockResolvedValueOnce(0);
+
+    await installHelmPlugins([
+      'https://github.com/databus23/helm-diff@v3.15.8'
+    ]);
+
+    expect(mockCore.warning).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Failed to clean up partial plugin install for helm-diff-linux-amd64.tgz'
+      )
+    );
+    expect(mockExec).toHaveBeenCalledWith(
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/databus23/helm-diff',
+        '--version',
+        'v3.15.8'
+      ],
       expect.any(Object)
     );
   });
@@ -432,7 +643,6 @@ describe('installHelmPlugins', () => {
   });
 
   it('should fall back to legacy install when no .tgz assets found on Helm v4', async () => {
-    // Mock GitHub API returning only platform-specific archives (no .prov files)
     mockGetJson.mockResolvedValueOnce({
       result: {
         assets: [
@@ -448,7 +658,6 @@ describe('installHelmPlugins', () => {
 
     await installHelmPlugins(['https://github.com/databus23/helm-diff']);
 
-    // Should fall back to legacy install with --verify=false
     expect(mockExec).toHaveBeenCalledWith(
       'helm',
       [
@@ -461,6 +670,77 @@ describe('installHelmPlugins', () => {
     );
     expect(mockCore.info).toHaveBeenCalledWith(
       'No Helm v4 plugin packages found for https://github.com/databus23/helm-diff, using legacy install'
+    );
+  });
+
+  it('should install the runner-matching .tgz when per-platform archives have .prov files', async () => {
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'helm-diff-linux-amd64.tgz',
+            browser_download_url:
+              'https://github.com/databus23/helm-diff/releases/download/v3.15.8/helm-diff-linux-amd64.tgz'
+          },
+          {
+            name: 'helm-diff-linux-amd64.tgz.prov',
+            browser_download_url:
+              'https://github.com/databus23/helm-diff/releases/download/v3.15.8/helm-diff-linux-amd64.tgz.prov'
+          },
+          {
+            name: 'helm-diff-macos-arm64.tgz',
+            browser_download_url:
+              'https://github.com/databus23/helm-diff/releases/download/v3.15.8/helm-diff-macos-arm64.tgz'
+          },
+          {
+            name: 'helm-diff-macos-arm64.tgz.prov',
+            browser_download_url:
+              'https://github.com/databus23/helm-diff/releases/download/v3.15.8/helm-diff-macos-arm64.tgz.prov'
+          },
+          {
+            name: 'helm-diff-windows-amd64.tgz',
+            browser_download_url:
+              'https://github.com/databus23/helm-diff/releases/download/v3.15.8/helm-diff-windows-amd64.tgz'
+          },
+          {
+            name: 'helm-diff-windows-amd64.tgz.prov',
+            browser_download_url:
+              'https://github.com/databus23/helm-diff/releases/download/v3.15.8/helm-diff-windows-amd64.tgz.prov'
+          }
+        ]
+      }
+    });
+    mockExec.mockResolvedValue(0);
+
+    await installHelmPlugins([
+      'https://github.com/databus23/helm-diff@v3.15.8'
+    ]);
+
+    const runnerPlatform =
+      os.platform() === 'win32' ? 'windows' : os.platform();
+    const runnerArch = os.arch() === 'x64' ? 'amd64' : os.arch();
+    const expectedAsset =
+      runnerPlatform === 'linux' && runnerArch === 'amd64'
+        ? 'https://github.com/databus23/helm-diff/releases/download/v3.15.8/helm-diff-linux-amd64.tgz'
+        : runnerPlatform === 'darwin' && runnerArch === 'arm64'
+          ? 'https://github.com/databus23/helm-diff/releases/download/v3.15.8/helm-diff-macos-arm64.tgz'
+          : runnerPlatform === 'windows' && runnerArch === 'amd64'
+            ? 'https://github.com/databus23/helm-diff/releases/download/v3.15.8/helm-diff-windows-amd64.tgz'
+            : undefined;
+
+    expect(mockExec).toHaveBeenCalledWith(
+      'helm',
+      ['plugin', 'install', expectedAsset ?? expect.any(String)],
+      expect.any(Object)
+    );
+    expect(mockExec).not.toHaveBeenCalledWith(
+      'helm',
+      expect.arrayContaining([
+        'https://github.com/databus23/helm-diff',
+        '--version',
+        'v3.15.8'
+      ]),
+      expect.any(Object)
     );
   });
 
@@ -686,6 +966,203 @@ describe('resolveHelmV4PluginAssets', () => {
       'https://api.github.com/repos/owner/plugin/releases/tags/1.0.0'
     );
     expect(result).toEqual(['https://example.com/plugin-1.0.0.tgz']);
+  });
+
+  it('should filter per-platform .tgz assets to match runner OS/arch', async () => {
+    const assets = [
+      {
+        name: 'helm-diff-freebsd-amd64.tgz',
+        browser_download_url: 'https://example.com/helm-diff-freebsd-amd64.tgz'
+      },
+      {
+        name: 'helm-diff-linux-amd64.tgz',
+        browser_download_url: 'https://example.com/helm-diff-linux-amd64.tgz'
+      },
+      {
+        name: 'helm-diff-macos-arm64.tgz',
+        browser_download_url: 'https://example.com/helm-diff-macos-arm64.tgz'
+      },
+      {
+        name: 'helm-diff-windows-amd64.tgz',
+        browser_download_url: 'https://example.com/helm-diff-windows-amd64.tgz'
+      }
+    ];
+
+    const result = filterPlatformAsset(assets, 'linux', 'amd64');
+
+    expect(result).toEqual([
+      {
+        name: 'helm-diff-linux-amd64.tgz',
+        browser_download_url: 'https://example.com/helm-diff-linux-amd64.tgz'
+      }
+    ]);
+  });
+
+  it('should match darwin platform with macos-named assets', async () => {
+    const assets = [
+      {
+        name: 'helm-diff-linux-amd64.tgz',
+        browser_download_url: 'https://example.com/helm-diff-linux-amd64.tgz'
+      },
+      {
+        name: 'helm-diff-macos-arm64.tgz',
+        browser_download_url: 'https://example.com/helm-diff-macos-arm64.tgz'
+      }
+    ];
+
+    const result = filterPlatformAsset(assets, 'darwin', 'arm64');
+
+    expect(result).toEqual([
+      {
+        name: 'helm-diff-macos-arm64.tgz',
+        browser_download_url: 'https://example.com/helm-diff-macos-arm64.tgz'
+      }
+    ]);
+  });
+
+  it('should not match darwin assets for windows runners', async () => {
+    const assets = [
+      {
+        name: 'plugin-darwin-amd64.tgz',
+        browser_download_url: 'https://example.com/plugin-darwin-amd64.tgz'
+      },
+      {
+        name: 'plugin-windows-amd64.tgz',
+        browser_download_url: 'https://example.com/plugin-windows-amd64.tgz'
+      }
+    ];
+
+    const result = filterPlatformAsset(assets, 'windows', 'amd64');
+
+    expect(result).toEqual([
+      {
+        name: 'plugin-windows-amd64.tgz',
+        browser_download_url: 'https://example.com/plugin-windows-amd64.tgz'
+      }
+    ]);
+  });
+
+  it('should match x64 arch with amd64-named assets', async () => {
+    const assets = [
+      {
+        name: 'plugin-linux-amd64.tgz',
+        browser_download_url: 'https://example.com/plugin-linux-amd64.tgz'
+      },
+      {
+        name: 'plugin-linux-arm64.tgz',
+        browser_download_url: 'https://example.com/plugin-linux-arm64.tgz'
+      }
+    ];
+
+    const result = filterPlatformAsset(assets, 'linux', 'x64');
+
+    expect(result).toEqual([
+      {
+        name: 'plugin-linux-amd64.tgz',
+        browser_download_url: 'https://example.com/plugin-linux-amd64.tgz'
+      }
+    ]);
+  });
+
+  it('should return all assets when none match runner platform', async () => {
+    const assets = [
+      {
+        name: 'helm-diff-linux-amd64.tgz',
+        browser_download_url: 'https://example.com/helm-diff-linux-amd64.tgz'
+      },
+      {
+        name: 'helm-diff-macos-arm64.tgz',
+        browser_download_url: 'https://example.com/helm-diff-macos-arm64.tgz'
+      }
+    ];
+
+    const result = filterPlatformAsset(assets, 'aix', 'ppc64');
+
+    expect(result).toEqual(assets);
+  });
+
+  it('should return all assets when names lack platform/arch info', async () => {
+    const assets = [
+      {
+        name: 'secrets-4.7.1.tgz',
+        browser_download_url: 'https://example.com/secrets-4.7.1.tgz'
+      },
+      {
+        name: 'secrets-getter-4.7.1.tgz',
+        browser_download_url: 'https://example.com/secrets-getter-4.7.1.tgz'
+      }
+    ];
+
+    const result = filterPlatformAsset(assets, 'linux', 'amd64');
+
+    expect(result).toEqual(assets);
+  });
+
+  it('should return runner-matching assets for per-platform archives with .prov files', async () => {
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'helm-diff-linux-amd64.tgz',
+            browser_download_url:
+              'https://example.com/helm-diff-linux-amd64.tgz'
+          },
+          {
+            name: 'helm-diff-linux-amd64.tgz.prov',
+            browser_download_url:
+              'https://example.com/helm-diff-linux-amd64.tgz.prov'
+          },
+          {
+            name: 'helm-diff-macos-arm64.tgz',
+            browser_download_url:
+              'https://example.com/helm-diff-macos-arm64.tgz'
+          },
+          {
+            name: 'helm-diff-macos-arm64.tgz.prov',
+            browser_download_url:
+              'https://example.com/helm-diff-macos-arm64.tgz.prov'
+          },
+          {
+            name: 'helm-diff-windows-amd64.tgz',
+            browser_download_url:
+              'https://example.com/helm-diff-windows-amd64.tgz'
+          },
+          {
+            name: 'helm-diff-windows-amd64.tgz.prov',
+            browser_download_url:
+              'https://example.com/helm-diff-windows-amd64.tgz.prov'
+          }
+        ]
+      }
+    });
+
+    const result = await resolveHelmV4PluginAssets(
+      'https://github.com/databus23/helm-diff',
+      'v3.15.8'
+    );
+
+    const runnerPlatform =
+      os.platform() === 'win32' ? 'windows' : os.platform();
+    const runnerArch = os.arch() === 'x64' ? 'amd64' : os.arch();
+
+    const expectedAsset =
+      runnerPlatform === 'linux' && runnerArch === 'amd64'
+        ? 'https://example.com/helm-diff-linux-amd64.tgz'
+        : runnerPlatform === 'darwin' && runnerArch === 'arm64'
+          ? 'https://example.com/helm-diff-macos-arm64.tgz'
+          : runnerPlatform === 'windows' && runnerArch === 'amd64'
+            ? 'https://example.com/helm-diff-windows-amd64.tgz'
+            : undefined;
+
+    expect(result).toEqual(
+      expectedAsset
+        ? [expectedAsset]
+        : [
+            'https://example.com/helm-diff-linux-amd64.tgz',
+            'https://example.com/helm-diff-macos-arm64.tgz',
+            'https://example.com/helm-diff-windows-amd64.tgz'
+          ]
+    );
   });
 
   it('should not warn when first tag 404s but second tag succeeds with no v4 assets', async () => {

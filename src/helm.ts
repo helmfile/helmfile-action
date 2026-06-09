@@ -1,6 +1,7 @@
 import * as core from '@actions/core';
 import {exec, ExecOptions, getExecOutput} from '@actions/exec';
 import * as http from '@actions/http-client';
+import * as fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import {
@@ -91,6 +92,100 @@ export async function importPluginGpgKey(owner: string): Promise<void> {
   }
 }
 
+async function getHelmPluginsDir(): Promise<string | null> {
+  const pluginsDir = process.env.HELM_PLUGINS?.trim();
+  if (pluginsDir) return pluginsDir;
+
+  try {
+    const output = await getExecOutput('helm', ['env', 'HELM_PLUGINS'], {
+      silent: true
+    });
+    return output.stdout.trim().replace(/^"(.*)"$/, '$1') || null;
+  } catch (error) {
+    core.warning(`Failed to determine Helm plugin directory: ${error}`);
+    return null;
+  }
+}
+
+async function cleanupPartialPluginInstall(assetUrl: string): Promise<void> {
+  const pluginsDir = await getHelmPluginsDir();
+  if (!pluginsDir) return;
+
+  let assetName = '';
+  try {
+    assetName = path.basename(decodeURIComponent(new URL(assetUrl).pathname));
+  } catch {
+    assetName = path.basename(
+      decodeURIComponent(assetUrl).split('/').pop() ?? ''
+    );
+  }
+
+  if (!assetName.toLowerCase().endsWith('.tgz')) return;
+
+  try {
+    await fs.rm(path.join(pluginsDir, assetName.replace(/\.tgz$/i, '')), {
+      recursive: true,
+      force: true
+    });
+  } catch (error) {
+    core.warning(
+      `Failed to clean up partial plugin install for ${assetName}: ${error}`
+    );
+  }
+}
+
+const PLATFORM_ALIASES: Record<string, string[]> = {
+  linux: ['linux'],
+  darwin: ['macos', 'darwin'],
+  windows: ['windows', 'win']
+};
+
+const ARCH_ALIASES: Record<string, string[]> = {
+  amd64: ['amd64', 'x86_64'],
+  arm64: ['arm64', 'aarch64'],
+  arm: ['armv6', 'armv7', 'arm']
+};
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildAssetTokenRegex(patterns: string[]): RegExp {
+  return new RegExp(
+    `(?:^|[._-])(?:${patterns.map(escapeRegex).join('|')})(?=$|[._-])`,
+    'i'
+  );
+}
+
+export function filterPlatformAsset<T extends {name: string}>(
+  assets: T[],
+  runnerPlatform?: string,
+  runnerArch?: string
+): T[] {
+  const p =
+    runnerPlatform ?? (os.platform() === 'win32' ? 'windows' : os.platform());
+  const a = runnerArch
+    ? runnerArch === 'x64'
+      ? 'amd64'
+      : runnerArch
+    : os.arch() === 'x64'
+      ? 'amd64'
+      : os.arch();
+
+  const platformPatterns = PLATFORM_ALIASES[p] || [p];
+  const archPatterns = ARCH_ALIASES[a] || [a];
+
+  const platformRegex = buildAssetTokenRegex(platformPatterns);
+  const archRegex = buildAssetTokenRegex(archPatterns);
+
+  const matched = assets.filter(asset => {
+    const baseName = asset.name.replace(/\.tgz$/i, '');
+    return platformRegex.test(baseName) && archRegex.test(baseName);
+  });
+
+  return matched.length > 0 ? matched : assets;
+}
+
 // Resolve Helm v4-compatible .tgz plugin assets from a GitHub release.
 // Helm v4 plugins are distributed as .tgz archives with .prov provenance files.
 // Returns download URLs for v4 plugin packages, or empty array if none found.
@@ -149,19 +244,20 @@ export async function resolveHelmV4PluginAssets(
       const assets = response.result?.assets || [];
 
       // Helm v4 plugin packages have companion .prov (provenance) files.
-      // Platform-specific binaries (e.g., helm-diff-linux-amd64.tgz) do not.
       const provNames = new Set(
         assets
           .filter(a => a.name.endsWith('.tgz.prov'))
           .map(a => a.name.replace(/\.prov$/, ''))
       );
 
-      const v4PluginUrls = assets
-        .filter(a => a.name.endsWith('.tgz') && provNames.has(a.name))
-        .map(a => a.browser_download_url);
+      const v4PluginAssets = assets.filter(
+        a => a.name.endsWith('.tgz') && provNames.has(a.name)
+      );
 
-      if (v4PluginUrls.length > 0) {
-        return v4PluginUrls;
+      if (v4PluginAssets.length > 0) {
+        return filterPlatformAsset(v4PluginAssets).map(
+          a => a.browser_download_url
+        );
       }
     }
 
@@ -244,6 +340,7 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
         if (ownerParsed) {
           await importPluginGpgKey(ownerParsed.owner);
         }
+        let installed = false;
         for (const assetUrl of v4Assets) {
           let assetStderr = '';
           const assetOptions: ExecOptions = {
@@ -263,8 +360,10 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
 
           if (eCode === 0) {
             core.info(`Installed Helm v4 plugin from ${assetUrl}`);
+            installed = true;
           } else if (assetStderr.includes('plugin already exists')) {
             core.info(`Plugin from ${assetUrl} already exists`);
+            installed = true;
           } else if (
             assetStderr.includes('verification') ||
             assetStderr.includes('pubring') ||
@@ -275,6 +374,7 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
             core.warning(
               `Verification failed for ${assetUrl}, retrying with --verify=false`
             );
+            await cleanupPartialPluginInstall(assetUrl);
             assetStderr = '';
             eCode = await exec(
               'helm',
@@ -285,25 +385,39 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
               core.info(
                 `Installed Helm v4 plugin from ${assetUrl} (unverified)`
               );
+              installed = true;
             } else if (assetStderr.includes('plugin already exists')) {
               core.info(`Plugin from ${assetUrl} already exists`);
+              installed = true;
             } else {
-              throw new Error(
+              await cleanupPartialPluginInstall(assetUrl);
+              core.warning(
                 `Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`
               );
             }
           } else {
-            throw new Error(
+            await cleanupPartialPluginInstall(assetUrl);
+            core.warning(
               `Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`
             );
           }
+
+          if (installed) {
+            break;
+          }
         }
-        continue;
+        if (installed) {
+          continue;
+        }
+        core.info(
+          `All .tgz installs failed for ${pluginUrl}, falling back to legacy install`
+        );
+      } else {
+        // No v4 .tgz packages found — fall back to legacy install with --verify=false
+        core.info(
+          `No Helm v4 plugin packages found for ${pluginUrl}, using legacy install`
+        );
       }
-      // No v4 .tgz packages found — fall back to legacy install with --verify=false
-      core.info(
-        `No Helm v4 plugin packages found for ${pluginUrl}, using legacy install`
-      );
     }
 
     // Legacy install: Helm v3, or Helm v4 fallback for plugins without .tgz packages

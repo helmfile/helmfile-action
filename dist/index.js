@@ -5599,6 +5599,24 @@ class SecureProxyConnectionError extends UndiciError {
   [kSecureProxyConnectionError] = true
 }
 
+const kMessageSizeExceededError = Symbol.for('undici.error.UND_ERR_WS_MESSAGE_SIZE_EXCEEDED')
+class MessageSizeExceededError extends UndiciError {
+  constructor (message) {
+    super(message)
+    this.name = 'MessageSizeExceededError'
+    this.message = message || 'Max decompressed message size exceeded'
+    this.code = 'UND_ERR_WS_MESSAGE_SIZE_EXCEEDED'
+  }
+
+  static [Symbol.hasInstance] (instance) {
+    return instance && instance[kMessageSizeExceededError] === true
+  }
+
+  get [kMessageSizeExceededError] () {
+    return true
+  }
+}
+
 module.exports = {
   AbortError,
   HTTPParserError,
@@ -5622,7 +5640,8 @@ module.exports = {
   ResponseExceededMaxSizeError,
   RequestRetryError,
   ResponseError,
-  SecureProxyConnectionError
+  SecureProxyConnectionError,
+  MessageSizeExceededError
 }
 
 
@@ -5697,6 +5716,10 @@ class Request {
 
     if (upgrade && typeof upgrade !== 'string') {
       throw new InvalidArgumentError('upgrade must be a string')
+    }
+
+    if (upgrade && !isValidHeaderValue(upgrade)) {
+      throw new InvalidArgumentError('invalid upgrade header')
     }
 
     if (headersTimeout != null && (!Number.isFinite(headersTimeout) || headersTimeout < 0)) {
@@ -5993,13 +6016,19 @@ function processHeader (request, key, val) {
     val = `${val}`
   }
 
-  if (request.host === null && headerName === 'host') {
+  if (headerName === 'host') {
+    if (request.host !== null) {
+      throw new InvalidArgumentError('duplicate host header')
+    }
     if (typeof val !== 'string') {
       throw new InvalidArgumentError('invalid host header')
     }
     // Consumed by Client
     request.host = val
-  } else if (request.contentLength === null && headerName === 'content-length') {
+  } else if (headerName === 'content-length') {
+    if (request.contentLength !== null) {
+      throw new InvalidArgumentError('duplicate content-length header')
+    }
     request.contentLength = parseInt(val, 10)
     if (!Number.isFinite(request.contentLength)) {
       throw new InvalidArgumentError('invalid content-length header')
@@ -28716,10 +28745,14 @@ module.exports = {
 
 const { createInflateRaw, Z_DEFAULT_WINDOWBITS } = __nccwpck_require__(8522)
 const { isValidClientWindowBits } = __nccwpck_require__(8625)
+const { MessageSizeExceededError } = __nccwpck_require__(8707)
 
 const tail = Buffer.from([0x00, 0x00, 0xff, 0xff])
 const kBuffer = Symbol('kBuffer')
 const kLength = Symbol('kLength')
+
+// Default maximum decompressed message size: 4 MB
+const kDefaultMaxDecompressedSize = 4 * 1024 * 1024
 
 class PerMessageDeflate {
   /** @type {import('node:zlib').InflateRaw} */
@@ -28727,6 +28760,15 @@ class PerMessageDeflate {
 
   #options = {}
 
+  /** @type {boolean} */
+  #aborted = false
+
+  /** @type {Function|null} */
+  #currentCallback = null
+
+  /**
+   * @param {Map<string, string>} extensions
+   */
   constructor (extensions) {
     this.#options.serverNoContextTakeover = extensions.has('server_no_context_takeover')
     this.#options.serverMaxWindowBits = extensions.get('server_max_window_bits')
@@ -28737,6 +28779,11 @@ class PerMessageDeflate {
     // 1.  Append 4 octets of 0x00 0x00 0xff 0xff to the tail end of the
     //     payload of the message.
     // 2.  Decompress the resulting data using DEFLATE.
+
+    if (this.#aborted) {
+      callback(new MessageSizeExceededError())
+      return
+    }
 
     if (!this.#inflate) {
       let windowBits = Z_DEFAULT_WINDOWBITS
@@ -28750,13 +28797,37 @@ class PerMessageDeflate {
         windowBits = Number.parseInt(this.#options.serverMaxWindowBits)
       }
 
-      this.#inflate = createInflateRaw({ windowBits })
+      try {
+        this.#inflate = createInflateRaw({ windowBits })
+      } catch (err) {
+        callback(err)
+        return
+      }
       this.#inflate[kBuffer] = []
       this.#inflate[kLength] = 0
 
       this.#inflate.on('data', (data) => {
-        this.#inflate[kBuffer].push(data)
+        if (this.#aborted) {
+          return
+        }
+
         this.#inflate[kLength] += data.length
+
+        if (this.#inflate[kLength] > kDefaultMaxDecompressedSize) {
+          this.#aborted = true
+          this.#inflate.removeAllListeners()
+          this.#inflate.destroy()
+          this.#inflate = null
+
+          if (this.#currentCallback) {
+            const cb = this.#currentCallback
+            this.#currentCallback = null
+            cb(new MessageSizeExceededError())
+          }
+          return
+        }
+
+        this.#inflate[kBuffer].push(data)
       })
 
       this.#inflate.on('error', (err) => {
@@ -28765,16 +28836,22 @@ class PerMessageDeflate {
       })
     }
 
+    this.#currentCallback = callback
     this.#inflate.write(chunk)
     if (fin) {
       this.#inflate.write(tail)
     }
 
     this.#inflate.flush(() => {
+      if (this.#aborted || !this.#inflate) {
+        return
+      }
+
       const full = Buffer.concat(this.#inflate[kBuffer], this.#inflate[kLength])
 
       this.#inflate[kBuffer].length = 0
       this.#inflate[kLength] = 0
+      this.#currentCallback = null
 
       callback(null, full)
     })
@@ -28828,6 +28905,10 @@ class ByteParser extends Writable {
   /** @type {Map<string, PerMessageDeflate>} */
   #extensions
 
+  /**
+   * @param {import('./websocket').WebSocket} ws
+   * @param {Map<string, string>|null} extensions
+   */
   constructor (ws, extensions) {
     super()
 
@@ -28970,6 +29051,7 @@ class ByteParser extends Writable {
 
         const buffer = this.consume(8)
         const upper = buffer.readUInt32BE(0)
+        const lower = buffer.readUInt32BE(4)
 
         // 2^31 is the maximum bytes an arraybuffer can contain
         // on 32-bit systems. Although, on 64-bit systems, this is
@@ -28977,14 +29059,12 @@ class ByteParser extends Writable {
         // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Invalid_array_length
         // https://source.chromium.org/chromium/chromium/src/+/main:v8/src/common/globals.h;drc=1946212ac0100668f14eb9e2843bdd846e510a1e;bpv=1;bpt=1;l=1275
         // https://source.chromium.org/chromium/chromium/src/+/main:v8/src/objects/js-array-buffer.h;l=34;drc=1946212ac0100668f14eb9e2843bdd846e510a1e
-        if (upper > 2 ** 31 - 1) {
+        if (upper !== 0 || lower > 2 ** 31 - 1) {
           failWebsocketConnection(this.ws, 'Received payload length > 2^31 bytes.')
           return
         }
 
-        const lower = buffer.readUInt32BE(4)
-
-        this.#info.payloadLength = (upper << 8) + lower
+        this.#info.payloadLength = lower
         this.#state = parserStates.READ_DATA
       } else if (this.#state === parserStates.READ_DATA) {
         if (this.#byteOffset < this.#info.payloadLength) {
@@ -29014,7 +29094,7 @@ class ByteParser extends Writable {
           } else {
             this.#extensions.get('permessage-deflate').decompress(body, this.#info.fin, (error, data) => {
               if (error) {
-                closeWebSocketConnection(this.ws, 1007, error.message, error.message.length)
+                failWebsocketConnection(this.ws, error.message)
                 return
               }
 
@@ -29618,6 +29698,12 @@ function parseExtensions (extensions) {
  * @param {string} value
  */
 function isValidClientWindowBits (value) {
+  // Must have at least one character
+  if (value.length === 0) {
+    return false
+  }
+
+  // Check all characters are ASCII digits
   for (let i = 0; i < value.length; i++) {
     const byte = value.charCodeAt(i)
 
@@ -29626,7 +29712,9 @@ function isValidClientWindowBits (value) {
     }
   }
 
-  return true
+  // Check numeric range: zlib requires windowBits in range 8-15
+  const num = Number.parseInt(value, 10)
+  return num >= 8 && num <= 15
 }
 
 // https://nodejs.org/api/intl.html#detecting-internationalization-support
@@ -30104,7 +30192,7 @@ class WebSocket extends EventTarget {
    * @see https://websockets.spec.whatwg.org/#feedback-from-the-protocol
    */
   #onConnectionEstablished (response, parsedExtensions) {
-    // processResponse is called when the "response’s header list has been received and initialized."
+    // processResponse is called when the "response's header list has been received and initialized."
     // once this happens, the connection is open
     this[kResponse] = response
 
@@ -33518,6 +33606,8 @@ function getIDToken(aud) {
  */
 
 //# sourceMappingURL=core.js.map
+;// CONCATENATED MODULE: external "fs/promises"
+const promises_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("fs/promises");
 // EXTERNAL MODULE: ./node_modules/@actions/tool-cache/node_modules/semver/index.js
 var node_modules_semver = __nccwpck_require__(885);
 ;// CONCATENATED MODULE: ./node_modules/@actions/tool-cache/lib/manifest.js
@@ -34360,6 +34450,7 @@ async function helpers_cacheDir(path, tool, version) {
 
 
 
+
 // Parse owner and repo from a GitHub URL using proper URL parsing.
 // Returns null for non-GitHub URLs or URLs without a valid owner/repo path.
 function parseGitHubRepo(urlString) {
@@ -34436,6 +34527,79 @@ async function importPluginGpgKey(owner) {
         warning(`Failed to import GPG key for ${owner}: ${error}`);
     }
 }
+async function getHelmPluginsDir() {
+    const pluginsDir = process.env.HELM_PLUGINS?.trim();
+    if (pluginsDir)
+        return pluginsDir;
+    try {
+        const output = await getExecOutput('helm', ['env', 'HELM_PLUGINS'], {
+            silent: true
+        });
+        return output.stdout.trim().replace(/^"(.*)"$/, '$1') || null;
+    }
+    catch (error) {
+        warning(`Failed to determine Helm plugin directory: ${error}`);
+        return null;
+    }
+}
+async function cleanupPartialPluginInstall(assetUrl) {
+    const pluginsDir = await getHelmPluginsDir();
+    if (!pluginsDir)
+        return;
+    let assetName = '';
+    try {
+        assetName = external_path_default().basename(decodeURIComponent(new URL(assetUrl).pathname));
+    }
+    catch {
+        assetName = external_path_default().basename(decodeURIComponent(assetUrl).split('/').pop() ?? '');
+    }
+    if (!assetName.toLowerCase().endsWith('.tgz'))
+        return;
+    try {
+        await promises_namespaceObject.rm(external_path_default().join(pluginsDir, assetName.replace(/\.tgz$/i, '')), {
+            recursive: true,
+            force: true
+        });
+    }
+    catch (error) {
+        warning(`Failed to clean up partial plugin install for ${assetName}: ${error}`);
+    }
+}
+const PLATFORM_ALIASES = {
+    linux: ['linux'],
+    darwin: ['macos', 'darwin'],
+    windows: ['windows', 'win']
+};
+const ARCH_ALIASES = {
+    amd64: ['amd64', 'x86_64'],
+    arm64: ['arm64', 'aarch64'],
+    arm: ['armv6', 'armv7', 'arm']
+};
+function escapeRegex(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+function buildAssetTokenRegex(patterns) {
+    return new RegExp(`(?:^|[._-])(?:${patterns.map(escapeRegex).join('|')})(?=$|[._-])`, 'i');
+}
+function filterPlatformAsset(assets, runnerPlatform, runnerArch) {
+    const p = runnerPlatform ?? (external_os_default().platform() === 'win32' ? 'windows' : external_os_default().platform());
+    const a = runnerArch
+        ? runnerArch === 'x64'
+            ? 'amd64'
+            : runnerArch
+        : external_os_default().arch() === 'x64'
+            ? 'amd64'
+            : external_os_default().arch();
+    const platformPatterns = PLATFORM_ALIASES[p] || [p];
+    const archPatterns = ARCH_ALIASES[a] || [a];
+    const platformRegex = buildAssetTokenRegex(platformPatterns);
+    const archRegex = buildAssetTokenRegex(archPatterns);
+    const matched = assets.filter(asset => {
+        const baseName = asset.name.replace(/\.tgz$/i, '');
+        return platformRegex.test(baseName) && archRegex.test(baseName);
+    });
+    return matched.length > 0 ? matched : assets;
+}
 // Resolve Helm v4-compatible .tgz plugin assets from a GitHub release.
 // Helm v4 plugins are distributed as .tgz archives with .prov provenance files.
 // Returns download URLs for v4 plugin packages, or empty array if none found.
@@ -34480,15 +34644,12 @@ async function resolveHelmV4PluginAssets(pluginUrl, version) {
             lastError = undefined;
             const assets = response.result?.assets || [];
             // Helm v4 plugin packages have companion .prov (provenance) files.
-            // Platform-specific binaries (e.g., helm-diff-linux-amd64.tgz) do not.
             const provNames = new Set(assets
                 .filter(a => a.name.endsWith('.tgz.prov'))
                 .map(a => a.name.replace(/\.prov$/, '')));
-            const v4PluginUrls = assets
-                .filter(a => a.name.endsWith('.tgz') && provNames.has(a.name))
-                .map(a => a.browser_download_url);
-            if (v4PluginUrls.length > 0) {
-                return v4PluginUrls;
+            const v4PluginAssets = assets.filter(a => a.name.endsWith('.tgz') && provNames.has(a.name));
+            if (v4PluginAssets.length > 0) {
+                return filterPlatformAsset(v4PluginAssets).map(a => a.browser_download_url);
             }
         }
         if (lastError) {
@@ -34555,6 +34716,7 @@ async function installHelmPlugins(plugins) {
                 if (ownerParsed) {
                     await importPluginGpgKey(ownerParsed.owner);
                 }
+                let installed = false;
                 for (const assetUrl of v4Assets) {
                     let assetStderr = '';
                     const assetOptions = {
@@ -34568,9 +34730,11 @@ async function installHelmPlugins(plugins) {
                     let eCode = await exec_exec('helm', ['plugin', 'install', assetUrl], assetOptions);
                     if (eCode === 0) {
                         info(`Installed Helm v4 plugin from ${assetUrl}`);
+                        installed = true;
                     }
                     else if (assetStderr.includes('plugin already exists')) {
                         info(`Plugin from ${assetUrl} already exists`);
+                        installed = true;
                     }
                     else if (assetStderr.includes('verification') ||
                         assetStderr.includes('pubring') ||
@@ -34578,26 +34742,39 @@ async function installHelmPlugins(plugins) {
                         // Verification failed (e.g., GPG key missing/wrong) — retry with
                         // --verify=false. The .tgz still registers as a proper v4 plugin.
                         warning(`Verification failed for ${assetUrl}, retrying with --verify=false`);
+                        await cleanupPartialPluginInstall(assetUrl);
                         assetStderr = '';
                         eCode = await exec_exec('helm', ['plugin', 'install', '--verify=false', assetUrl], assetOptions);
                         if (eCode === 0) {
                             info(`Installed Helm v4 plugin from ${assetUrl} (unverified)`);
+                            installed = true;
                         }
                         else if (assetStderr.includes('plugin already exists')) {
                             info(`Plugin from ${assetUrl} already exists`);
+                            installed = true;
                         }
                         else {
-                            throw new Error(`Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`);
+                            await cleanupPartialPluginInstall(assetUrl);
+                            warning(`Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`);
                         }
                     }
                     else {
-                        throw new Error(`Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`);
+                        await cleanupPartialPluginInstall(assetUrl);
+                        warning(`Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`);
+                    }
+                    if (installed) {
+                        break;
                     }
                 }
-                continue;
+                if (installed) {
+                    continue;
+                }
+                info(`All .tgz installs failed for ${pluginUrl}, falling back to legacy install`);
             }
-            // No v4 .tgz packages found — fall back to legacy install with --verify=false
-            info(`No Helm v4 plugin packages found for ${pluginUrl}, using legacy install`);
+            else {
+                // No v4 .tgz packages found — fall back to legacy install with --verify=false
+                info(`No Helm v4 plugin packages found for ${pluginUrl}, using legacy install`);
+            }
         }
         // Legacy install: Helm v3, or Helm v4 fallback for plugins without .tgz packages
         let pluginStderr = '';
