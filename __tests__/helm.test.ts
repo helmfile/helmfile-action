@@ -1,5 +1,6 @@
 import {jest} from '@jest/globals';
 import os from 'os';
+import path from 'path';
 
 const mockGetJson = jest.fn<any>();
 const mockHttpGet = jest.fn<any>();
@@ -478,7 +479,7 @@ describe('installHelmPlugins', () => {
     ]);
 
     expect(mockRm).toHaveBeenCalledWith(
-      '/tmp/helm/plugins/helm-diff-linux-amd64',
+      path.join('/tmp/helm/plugins', 'helm-diff-linux-amd64'),
       {
         recursive: true,
         force: true
