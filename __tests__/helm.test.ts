@@ -3,6 +3,7 @@ import os from 'os';
 
 const mockGetJson = jest.fn<any>();
 const mockHttpGet = jest.fn<any>();
+const mockRm = jest.fn<any>();
 
 // Mock the dependencies BEFORE importing the code under test
 jest.unstable_mockModule('@actions/core', () => ({
@@ -31,6 +32,10 @@ jest.unstable_mockModule('@actions/http-client', () => ({
   }))
 }));
 
+jest.unstable_mockModule('fs/promises', () => ({
+  rm: mockRm
+}));
+
 const {
   installHelmPlugins,
   resolveHelmV4PluginAssets,
@@ -49,6 +54,7 @@ const mockGetExecOutput = getExecOutput as jest.MockedFunction<
 describe('installHelmPlugins', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    delete process.env.HELM_PLUGINS;
     // Mock Helm v4 version output so --verify=false flag is added
     mockGetExecOutput.mockResolvedValue({
       exitCode: 0,
@@ -422,6 +428,68 @@ describe('installHelmPlugins', () => {
         'https://github.com/jkroepke/helm-secrets',
         '--version',
         'v4.7.1'
+      ],
+      expect.any(Object)
+    );
+  });
+
+  it('should remove the partial .tgz install before falling back to the legacy install', async () => {
+    process.env.HELM_PLUGINS = '/tmp/helm/plugins';
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'helm-diff-linux-amd64.tgz',
+            browser_download_url:
+              'https://github.com/databus23/helm-diff/releases/download/v3.15.8/helm-diff-linux-amd64.tgz'
+          },
+          {
+            name: 'helm-diff-linux-amd64.tgz.prov',
+            browser_download_url:
+              'https://github.com/databus23/helm-diff/releases/download/v3.15.8/helm-diff-linux-amd64.tgz.prov'
+          }
+        ]
+      }
+    });
+
+    mockExec
+      // gpg --import
+      .mockResolvedValueOnce(0)
+      // gpg --export (pubring.gpg)
+      .mockResolvedValueOnce(0)
+      // .tgz install attempt — partial install left behind
+      .mockImplementationOnce((_command, _args, opts) => {
+        if (opts?.listeners?.stderr) {
+          opts.listeners.stderr(
+            Buffer.from(
+              'Error: fork/exec /tmp/helm/plugins/helm-diff-linux-amd64/install-binary.sh: no such file or directory'
+            )
+          );
+        }
+        return Promise.resolve(1);
+      })
+      // legacy install succeeds
+      .mockResolvedValueOnce(0)
+      // helm plugin list
+      .mockResolvedValueOnce(0);
+
+    await installHelmPlugins([
+      'https://github.com/databus23/helm-diff@v3.15.8'
+    ]);
+
+    expect(mockRm).toHaveBeenCalledWith('/tmp/helm/plugins/helm-diff-linux-amd64', {
+      recursive: true,
+      force: true
+    });
+    expect(mockExec).toHaveBeenCalledWith(
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/databus23/helm-diff',
+        '--version',
+        'v3.15.8'
       ],
       expect.any(Object)
     );

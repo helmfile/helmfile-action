@@ -1,6 +1,7 @@
 import * as core from '@actions/core';
 import {exec, ExecOptions, getExecOutput} from '@actions/exec';
 import * as http from '@actions/http-client';
+import * as fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import {
@@ -89,6 +90,40 @@ export async function importPluginGpgKey(owner: string): Promise<void> {
   } catch (error) {
     core.warning(`Failed to import GPG key for ${owner}: ${error}`);
   }
+}
+
+async function getHelmPluginsDir(): Promise<string | null> {
+  const pluginsDir = process.env.HELM_PLUGINS?.trim();
+  if (pluginsDir) return pluginsDir;
+
+  try {
+    const output = await getExecOutput('helm', ['env', 'HELM_PLUGINS'], {
+      silent: true
+    });
+    return output.stdout.trim().replace(/^"(.*)"$/, '$1') || null;
+  } catch (error) {
+    core.warning(`Failed to determine Helm plugin directory: ${error}`);
+    return null;
+  }
+}
+
+async function cleanupPartialPluginInstall(assetUrl: string): Promise<void> {
+  const pluginsDir = await getHelmPluginsDir();
+  if (!pluginsDir) return;
+
+  let assetName = '';
+  try {
+    assetName = decodeURIComponent(path.basename(new URL(assetUrl).pathname));
+  } catch {
+    assetName = assetUrl.split('/').pop() ?? '';
+  }
+
+  if (!assetName.toLowerCase().endsWith('.tgz')) return;
+
+  await fs.rm(path.join(pluginsDir, assetName.replace(/\.tgz$/i, '')), {
+    recursive: true,
+    force: true
+  });
 }
 
 const PLATFORM_ALIASES: Record<string, string[]> = {
@@ -331,6 +366,7 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
             core.warning(
               `Verification failed for ${assetUrl}, retrying with --verify=false`
             );
+            await cleanupPartialPluginInstall(assetUrl);
             assetStderr = '';
             eCode = await exec(
               'helm',
@@ -346,11 +382,13 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
               core.info(`Plugin from ${assetUrl} already exists`);
               installed = true;
             } else {
+              await cleanupPartialPluginInstall(assetUrl);
               core.warning(
                 `Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`
               );
             }
           } else {
+            await cleanupPartialPluginInstall(assetUrl);
             core.warning(
               `Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`
             );
