@@ -115,7 +115,9 @@ async function cleanupPartialPluginInstall(assetUrl: string): Promise<void> {
   try {
     assetName = path.basename(decodeURIComponent(new URL(assetUrl).pathname));
   } catch {
-    assetName = path.basename(decodeURIComponent(assetUrl).split('/').pop() ?? '');
+    assetName = path.basename(
+      decodeURIComponent(assetUrl).split('/').pop() ?? ''
+    );
   }
 
   if (!assetName.toLowerCase().endsWith('.tgz')) return;
