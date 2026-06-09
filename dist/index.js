@@ -34548,10 +34548,10 @@ async function cleanupPartialPluginInstall(assetUrl) {
         return;
     let assetName = '';
     try {
-        assetName = decodeURIComponent(external_path_default().basename(new URL(assetUrl).pathname));
+        assetName = external_path_default().basename(decodeURIComponent(new URL(assetUrl).pathname));
     }
     catch {
-        assetName = assetUrl.split('/').pop() ?? '';
+        assetName = external_path_default().basename(decodeURIComponent(assetUrl).split('/').pop() ?? '');
     }
     if (!assetName.toLowerCase().endsWith('.tgz'))
         return;
