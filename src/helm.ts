@@ -122,10 +122,16 @@ async function cleanupPartialPluginInstall(assetUrl: string): Promise<void> {
 
   if (!assetName.toLowerCase().endsWith('.tgz')) return;
 
-  await fs.rm(path.join(pluginsDir, assetName.replace(/\.tgz$/i, '')), {
-    recursive: true,
-    force: true
-  });
+  try {
+    await fs.rm(path.join(pluginsDir, assetName.replace(/\.tgz$/i, '')), {
+      recursive: true,
+      force: true
+    });
+  } catch (error) {
+    core.warning(
+      `Failed to clean up partial plugin install for ${assetName}: ${error}`
+    );
+  }
 }
 
 const PLATFORM_ALIASES: Record<string, string[]> = {
@@ -394,6 +400,10 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
             core.warning(
               `Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`
             );
+          }
+
+          if (installed) {
+            break;
           }
         }
         if (installed) {

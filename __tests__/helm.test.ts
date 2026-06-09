@@ -282,7 +282,7 @@ describe('installHelmPlugins', () => {
       ],
       expect.any(Object)
     );
-    expect(mockExec).toHaveBeenCalledWith(
+    expect(mockExec).not.toHaveBeenCalledWith(
       'helm',
       [
         'plugin',
@@ -484,6 +484,128 @@ describe('installHelmPlugins', () => {
         recursive: true,
         force: true
       }
+    );
+    expect(mockExec).toHaveBeenCalledWith(
+      'helm',
+      [
+        'plugin',
+        'install',
+        '--verify=false',
+        'https://github.com/databus23/helm-diff',
+        '--version',
+        'v3.15.8'
+      ],
+      expect.any(Object)
+    );
+  });
+
+  it('should stop installing additional .tgz assets after first successful install', async () => {
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'secrets-4.7.1.tgz',
+            browser_download_url:
+              'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz'
+          },
+          {
+            name: 'secrets-4.7.1.tgz.prov',
+            browser_download_url:
+              'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz.prov'
+          },
+          {
+            name: 'secrets-alt-4.7.1.tgz',
+            browser_download_url:
+              'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-alt-4.7.1.tgz'
+          },
+          {
+            name: 'secrets-alt-4.7.1.tgz.prov',
+            browser_download_url:
+              'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-alt-4.7.1.tgz.prov'
+          }
+        ]
+      }
+    });
+
+    mockExec
+      // gpg --import
+      .mockResolvedValueOnce(0)
+      // gpg --export (pubring.gpg)
+      .mockResolvedValueOnce(0)
+      // first .tgz install succeeds
+      .mockResolvedValueOnce(0)
+      // helm plugin list
+      .mockResolvedValueOnce(0);
+
+    await installHelmPlugins([
+      'https://github.com/jkroepke/helm-secrets@v4.7.1'
+    ]);
+
+    expect(mockExec).toHaveBeenCalledWith(
+      'helm',
+      [
+        'plugin',
+        'install',
+        'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-4.7.1.tgz'
+      ],
+      expect.any(Object)
+    );
+    expect(mockExec).not.toHaveBeenCalledWith(
+      'helm',
+      [
+        'plugin',
+        'install',
+        'https://github.com/jkroepke/helm-secrets/releases/download/v4.7.1/secrets-alt-4.7.1.tgz'
+      ],
+      expect.any(Object)
+    );
+  });
+
+  it('should continue to legacy fallback when cleanup of partial install fails', async () => {
+    process.env.HELM_PLUGINS = '/tmp/helm/plugins';
+    mockRm.mockRejectedValueOnce(new Error('EPERM'));
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'helm-diff-linux-amd64.tgz',
+            browser_download_url:
+              'https://github.com/databus23/helm-diff/releases/download/v3.15.8/helm-diff-linux-amd64.tgz'
+          },
+          {
+            name: 'helm-diff-linux-amd64.tgz.prov',
+            browser_download_url:
+              'https://github.com/databus23/helm-diff/releases/download/v3.15.8/helm-diff-linux-amd64.tgz.prov'
+          }
+        ]
+      }
+    });
+
+    mockExec
+      // gpg --import
+      .mockResolvedValueOnce(0)
+      // gpg --export (pubring.gpg)
+      .mockResolvedValueOnce(0)
+      // .tgz install fails so cleanup runs and fails
+      .mockImplementationOnce((_command, _args, opts) => {
+        if (opts?.listeners?.stderr) {
+          opts.listeners.stderr(Buffer.from('Error: unable to untar plugin'));
+        }
+        return Promise.resolve(1);
+      })
+      // legacy install succeeds
+      .mockResolvedValueOnce(0)
+      // helm plugin list
+      .mockResolvedValueOnce(0);
+
+    await installHelmPlugins([
+      'https://github.com/databus23/helm-diff@v3.15.8'
+    ]);
+
+    expect(mockCore.warning).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Failed to clean up partial plugin install for helm-diff-linux-amd64.tgz'
+      )
     );
     expect(mockExec).toHaveBeenCalledWith(
       'helm',

@@ -34555,10 +34555,15 @@ async function cleanupPartialPluginInstall(assetUrl) {
     }
     if (!assetName.toLowerCase().endsWith('.tgz'))
         return;
-    await promises_namespaceObject.rm(external_path_default().join(pluginsDir, assetName.replace(/\.tgz$/i, '')), {
-        recursive: true,
-        force: true
-    });
+    try {
+        await promises_namespaceObject.rm(external_path_default().join(pluginsDir, assetName.replace(/\.tgz$/i, '')), {
+            recursive: true,
+            force: true
+        });
+    }
+    catch (error) {
+        warning(`Failed to clean up partial plugin install for ${assetName}: ${error}`);
+    }
 }
 const PLATFORM_ALIASES = {
     linux: ['linux'],
@@ -34756,6 +34761,9 @@ async function installHelmPlugins(plugins) {
                     else {
                         await cleanupPartialPluginInstall(assetUrl);
                         warning(`Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`);
+                    }
+                    if (installed) {
+                        break;
                     }
                 }
                 if (installed) {
