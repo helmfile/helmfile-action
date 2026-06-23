@@ -34826,17 +34826,7 @@ async function removeDuplicateAssetInstall(assetUrl) {
     }
     return false;
 }
-// Helm v4 emits this error (via logrus on stderr) when two plugin directories
-// declare the same plugin name. This happens when a plugin was already installed
-// under one directory (e.g. `helmfile init` installs "diff" into helm-diff/) and
-// a subsequent .tgz install extracts under an asset-named directory
-// (helm-diff-<os>-<arch>/). The install exits 0 but leaves a broken plugins dir.
-function isDuplicatePluginError(output) {
-    return /plugins claim the name/i.test(output);
-}
 function classifyPluginInstall(eCode, stderr) {
-    if (isDuplicatePluginError(stderr))
-        return 'duplicate';
     if (eCode === 0)
         return 'installed';
     if (stderr.includes('plugin already exists'))
@@ -35025,23 +35015,15 @@ async function installHelmPlugins(plugins) {
                     }
                     if (result === 'installed') {
                         const suffix = unverified ? ' (unverified)' : '';
-                        // Helm does not always report a duplicate plugin during install
-                        // (e.g. on Windows), so verify via the plugins directory that the
-                        // install did not collide with a pre-existing plugin.
+                        // Helm does not consistently report a duplicate plugin during
+                        // install (e.g. on Windows), so verify via the plugins directory
+                        // that the install did not collide with a pre-existing plugin.
                         if (await removeDuplicateAssetInstall(assetUrl)) {
                             info(`Plugin from ${assetUrl} already installed; removed duplicate directory${suffix}`);
                         }
                         else {
                             info(`Installed Helm v4 plugin from ${assetUrl}${suffix}`);
                         }
-                        installed = true;
-                    }
-                    else if (result === 'duplicate') {
-                        // The plugin was already installed under a different directory
-                        // (e.g. by `helmfile init`). Remove the duplicate directory we just
-                        // created from the .tgz so the plugins dir is not left broken.
-                        info(`Plugin from ${assetUrl} already installed; removing duplicate directory`);
-                        await cleanupPartialPluginInstall(assetUrl);
                         installed = true;
                     }
                     else if (result === 'exists') {

@@ -202,29 +202,17 @@ async function removeDuplicateAssetInstall(assetUrl: string): Promise<boolean> {
   return false;
 }
 
-// Helm v4 emits this error (via logrus on stderr) when two plugin directories
-// declare the same plugin name. This happens when a plugin was already installed
-// under one directory (e.g. `helmfile init` installs "diff" into helm-diff/) and
-// a subsequent .tgz install extracts under an asset-named directory
-// (helm-diff-<os>-<arch>/). The install exits 0 but leaves a broken plugins dir.
-function isDuplicatePluginError(output: string): boolean {
-  return /plugins claim the name/i.test(output);
-}
-
 // Classify the result of a `helm plugin install` attempt based on exit code and
 // stderr, so the v4 .tgz install loop can react consistently across retries.
-type PluginInstallResult =
-  | 'installed'
-  | 'duplicate'
-  | 'exists'
-  | 'verify-failed'
-  | 'failed';
+// Duplicate-name conflicts are intentionally NOT classified here: Helm does not
+// report them consistently during install (silent on Windows), so they are
+// detected post-install via removeDuplicateAssetInstall() instead.
+type PluginInstallResult = 'installed' | 'exists' | 'verify-failed' | 'failed';
 
 function classifyPluginInstall(
   eCode: number,
   stderr: string
 ): PluginInstallResult {
-  if (isDuplicatePluginError(stderr)) return 'duplicate';
   if (eCode === 0) return 'installed';
   if (stderr.includes('plugin already exists')) return 'exists';
   if (
@@ -483,9 +471,9 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
 
           if (result === 'installed') {
             const suffix = unverified ? ' (unverified)' : '';
-            // Helm does not always report a duplicate plugin during install
-            // (e.g. on Windows), so verify via the plugins directory that the
-            // install did not collide with a pre-existing plugin.
+            // Helm does not consistently report a duplicate plugin during
+            // install (e.g. on Windows), so verify via the plugins directory
+            // that the install did not collide with a pre-existing plugin.
             if (await removeDuplicateAssetInstall(assetUrl)) {
               core.info(
                 `Plugin from ${assetUrl} already installed; removed duplicate directory${suffix}`
@@ -493,15 +481,6 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
             } else {
               core.info(`Installed Helm v4 plugin from ${assetUrl}${suffix}`);
             }
-            installed = true;
-          } else if (result === 'duplicate') {
-            // The plugin was already installed under a different directory
-            // (e.g. by `helmfile init`). Remove the duplicate directory we just
-            // created from the .tgz so the plugins dir is not left broken.
-            core.info(
-              `Plugin from ${assetUrl} already installed; removing duplicate directory`
-            );
-            await cleanupPartialPluginInstall(assetUrl);
             installed = true;
           } else if (result === 'exists') {
             core.info(`Plugin from ${assetUrl} already exists`);
