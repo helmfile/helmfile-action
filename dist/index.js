@@ -34565,6 +34565,28 @@ async function cleanupPartialPluginInstall(assetUrl) {
         warning(`Failed to clean up partial plugin install for ${assetName}: ${error}`);
     }
 }
+// Helm v4 emits this error (via logrus on stderr) when two plugin directories
+// declare the same plugin name. This happens when a plugin was already installed
+// under one directory (e.g. `helmfile init` installs "diff" into helm-diff/) and
+// a subsequent .tgz install extracts under an asset-named directory
+// (helm-diff-<os>-<arch>/). The install exits 0 but leaves a broken plugins dir.
+function isDuplicatePluginError(output) {
+    return /plugins claim the name/i.test(output);
+}
+function classifyPluginInstall(eCode, stderr) {
+    if (isDuplicatePluginError(stderr))
+        return 'duplicate';
+    if (eCode === 0)
+        return 'installed';
+    if (stderr.includes('plugin already exists'))
+        return 'exists';
+    if (stderr.includes('verification') ||
+        stderr.includes('pubring') ||
+        stderr.includes('openpgp')) {
+        return 'verify-failed';
+    }
+    return 'failed';
+}
 const PLATFORM_ALIASES = {
     linux: ['linux'],
     darwin: ['macos', 'darwin'],
@@ -34728,35 +34750,34 @@ async function installHelmPlugins(plugins) {
                         }
                     };
                     let eCode = await exec_exec('helm', ['plugin', 'install', assetUrl], assetOptions);
-                    if (eCode === 0) {
-                        info(`Installed Helm v4 plugin from ${assetUrl}`);
-                        installed = true;
-                    }
-                    else if (assetStderr.includes('plugin already exists')) {
-                        info(`Plugin from ${assetUrl} already exists`);
-                        installed = true;
-                    }
-                    else if (assetStderr.includes('verification') ||
-                        assetStderr.includes('pubring') ||
-                        assetStderr.includes('openpgp')) {
-                        // Verification failed (e.g., GPG key missing/wrong) — retry with
-                        // --verify=false. The .tgz still registers as a proper v4 plugin.
+                    let result = classifyPluginInstall(eCode, assetStderr);
+                    let unverified = false;
+                    // Verification failed (e.g., GPG key missing/wrong) — retry with
+                    // --verify=false. The .tgz still registers as a proper v4 plugin.
+                    if (result === 'verify-failed') {
                         warning(`Verification failed for ${assetUrl}, retrying with --verify=false`);
                         await cleanupPartialPluginInstall(assetUrl);
                         assetStderr = '';
                         eCode = await exec_exec('helm', ['plugin', 'install', '--verify=false', assetUrl], assetOptions);
-                        if (eCode === 0) {
-                            info(`Installed Helm v4 plugin from ${assetUrl} (unverified)`);
-                            installed = true;
-                        }
-                        else if (assetStderr.includes('plugin already exists')) {
-                            info(`Plugin from ${assetUrl} already exists`);
-                            installed = true;
-                        }
-                        else {
-                            await cleanupPartialPluginInstall(assetUrl);
-                            warning(`Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`);
-                        }
+                        result = classifyPluginInstall(eCode, assetStderr);
+                        unverified = result === 'installed';
+                    }
+                    if (result === 'installed') {
+                        const suffix = unverified ? ' (unverified)' : '';
+                        info(`Installed Helm v4 plugin from ${assetUrl}${suffix}`);
+                        installed = true;
+                    }
+                    else if (result === 'duplicate') {
+                        // The plugin was already installed under a different directory
+                        // (e.g. by `helmfile init`). Remove the duplicate directory we just
+                        // created from the .tgz so the plugins dir is not left broken.
+                        info(`Plugin from ${assetUrl} already installed; removing duplicate directory`);
+                        await cleanupPartialPluginInstall(assetUrl);
+                        installed = true;
+                    }
+                    else if (result === 'exists') {
+                        info(`Plugin from ${assetUrl} already exists`);
+                        installed = true;
                     }
                     else {
                         await cleanupPartialPluginInstall(assetUrl);

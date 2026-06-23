@@ -373,6 +373,67 @@ describe('installHelmPlugins', () => {
     );
   });
 
+  it('should remove the duplicate plugin directory when the plugin is already installed', async () => {
+    process.env.HELM_PLUGINS = '/tmp/helm/plugins';
+    // Simulates helmfile init having already installed the "diff" plugin into
+    // helm-diff/. The v4 .tgz install extracts into helm-diff-linux-amd64/,
+    // claiming the same "diff" name. Helm reports the conflict on stderr but
+    // still exits 0.
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'helm-diff-linux-amd64.tgz',
+            browser_download_url:
+              'https://github.com/databus23/helm-diff/releases/download/v3.15.10/helm-diff-linux-amd64.tgz'
+          },
+          {
+            name: 'helm-diff-linux-amd64.tgz.prov',
+            browser_download_url:
+              'https://github.com/databus23/helm-diff/releases/download/v3.15.10/helm-diff-linux-amd64.tgz.prov'
+          }
+        ]
+      }
+    });
+
+    mockExec
+      // gpg --import
+      .mockResolvedValueOnce(0)
+      // gpg --export (pubring.gpg)
+      .mockResolvedValueOnce(0)
+      // .tgz install — succeeds (exit 0) but reports a duplicate plugin name
+      .mockImplementationOnce((_command, _args, opts) => {
+        if (opts?.listeners?.stderr) {
+          opts.listeners.stderr(
+            Buffer.from(
+              'level=ERROR msg="failed to load plugins" error="two plugins claim the name \\"diff\\" at \\"/tmp/helm/plugins/helm-diff\\" and \\"/tmp/helm/plugins/helm-diff-linux-amd64\\""'
+            )
+          );
+        }
+        return Promise.resolve(0);
+      })
+      // helm plugin list
+      .mockResolvedValueOnce(0);
+
+    await installHelmPlugins(['https://github.com/databus23/helm-diff']);
+
+    // Should remove the duplicate directory created from the .tgz asset
+    expect(mockRm).toHaveBeenCalledWith(
+      path.join('/tmp/helm/plugins', 'helm-diff-linux-amd64'),
+      {
+        recursive: true,
+        force: true
+      }
+    );
+    expect(mockCore.info).toHaveBeenCalledWith(
+      expect.stringContaining('already installed')
+    );
+    // Should not fall back to the legacy install
+    expect(mockCore.info).not.toHaveBeenCalledWith(
+      expect.stringContaining('falling back to legacy install')
+    );
+  });
+
   it('should fall back to legacy install when .tgz install fails for non-verification reason', async () => {
     mockGetJson.mockResolvedValueOnce({
       result: {
