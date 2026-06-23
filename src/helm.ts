@@ -134,6 +134,97 @@ async function cleanupPartialPluginInstall(assetUrl: string): Promise<void> {
   }
 }
 
+// Read the declared plugin name from a plugin directory's metadata file.
+// Helm v4 uses metadata.yaml, while Helm v3/legacy plugins use plugin.yaml.
+async function readPluginName(pluginDir: string): Promise<string | null> {
+  for (const file of ['metadata.yaml', 'plugin.yaml']) {
+    try {
+      const content = await fs.readFile(path.join(pluginDir, file), 'utf8');
+      const match = content.match(/^name:\s*['"]?([^\s'"]+)['"]?/m);
+      if (match) return match[1];
+    } catch {
+      // file missing — try the next candidate
+    }
+  }
+  return null;
+}
+
+// Helm does not consistently report a duplicate plugin name during install
+// (it is silent on Windows and only fails later at `helm plugin list`). After a
+// successful .tgz install, verify the just-created directory does not collide
+// with a pre-existing plugin (same name declared by a sibling directory). If it
+// does, remove the directory we just created from the .tgz asset and return
+// true so the caller can treat the plugin as already installed.
+async function removeDuplicateAssetInstall(assetUrl: string): Promise<boolean> {
+  const pluginsDir = await getHelmPluginsDir();
+  if (!pluginsDir) return false;
+
+  let assetDirName = '';
+  try {
+    assetDirName = path
+      .basename(decodeURIComponent(new URL(assetUrl).pathname))
+      .replace(/\.tgz$/i, '');
+  } catch {
+    return false;
+  }
+  if (!assetDirName) return false;
+
+  const assetPluginName = await readPluginName(
+    path.join(pluginsDir, assetDirName)
+  );
+  if (!assetPluginName) return false;
+
+  let entries: string[] = [];
+  try {
+    entries = await fs.readdir(pluginsDir);
+  } catch {
+    return false;
+  }
+
+  for (const entry of entries) {
+    if (entry === assetDirName) continue;
+    const siblingName = await readPluginName(path.join(pluginsDir, entry));
+    if (siblingName === assetPluginName) {
+      try {
+        await fs.rm(path.join(pluginsDir, assetDirName), {
+          recursive: true,
+          force: true
+        });
+      } catch (error) {
+        core.warning(
+          `Failed to remove duplicate plugin directory ${assetDirName}: ${error}`
+        );
+        return false;
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+// Classify the result of a `helm plugin install` attempt based on exit code and
+// stderr, so the v4 .tgz install loop can react consistently across retries.
+// Duplicate-name conflicts are intentionally NOT classified here: Helm does not
+// report them consistently during install (silent on Windows), so they are
+// detected post-install via removeDuplicateAssetInstall() instead.
+type PluginInstallResult = 'installed' | 'exists' | 'verify-failed' | 'failed';
+
+function classifyPluginInstall(
+  eCode: number,
+  stderr: string
+): PluginInstallResult {
+  if (eCode === 0) return 'installed';
+  if (stderr.includes('plugin already exists')) return 'exists';
+  if (
+    stderr.includes('verification') ||
+    stderr.includes('pubring') ||
+    stderr.includes('openpgp')
+  ) {
+    return 'verify-failed';
+  }
+  return 'failed';
+}
+
 const PLATFORM_ALIASES: Record<string, string[]> = {
   linux: ['linux'],
   darwin: ['macos', 'darwin'],
@@ -358,19 +449,12 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
             assetOptions
           );
 
-          if (eCode === 0) {
-            core.info(`Installed Helm v4 plugin from ${assetUrl}`);
-            installed = true;
-          } else if (assetStderr.includes('plugin already exists')) {
-            core.info(`Plugin from ${assetUrl} already exists`);
-            installed = true;
-          } else if (
-            assetStderr.includes('verification') ||
-            assetStderr.includes('pubring') ||
-            assetStderr.includes('openpgp')
-          ) {
-            // Verification failed (e.g., GPG key missing/wrong) — retry with
-            // --verify=false. The .tgz still registers as a proper v4 plugin.
+          let result = classifyPluginInstall(eCode, assetStderr);
+          let unverified = false;
+
+          // Verification failed (e.g., GPG key missing/wrong) — retry with
+          // --verify=false. The .tgz still registers as a proper v4 plugin.
+          if (result === 'verify-failed') {
             core.warning(
               `Verification failed for ${assetUrl}, retrying with --verify=false`
             );
@@ -381,20 +465,26 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
               ['plugin', 'install', '--verify=false', assetUrl],
               assetOptions
             );
-            if (eCode === 0) {
+            result = classifyPluginInstall(eCode, assetStderr);
+            unverified = result === 'installed';
+          }
+
+          if (result === 'installed') {
+            const suffix = unverified ? ' (unverified)' : '';
+            // Helm does not consistently report a duplicate plugin during
+            // install (e.g. on Windows), so verify via the plugins directory
+            // that the install did not collide with a pre-existing plugin.
+            if (await removeDuplicateAssetInstall(assetUrl)) {
               core.info(
-                `Installed Helm v4 plugin from ${assetUrl} (unverified)`
+                `Plugin from ${assetUrl} already installed; removed duplicate directory${suffix}`
               );
-              installed = true;
-            } else if (assetStderr.includes('plugin already exists')) {
-              core.info(`Plugin from ${assetUrl} already exists`);
-              installed = true;
             } else {
-              await cleanupPartialPluginInstall(assetUrl);
-              core.warning(
-                `Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`
-              );
+              core.info(`Installed Helm v4 plugin from ${assetUrl}${suffix}`);
             }
+            installed = true;
+          } else if (result === 'exists') {
+            core.info(`Plugin from ${assetUrl} already exists`);
+            installed = true;
           } else {
             await cleanupPartialPluginInstall(assetUrl);
             core.warning(
