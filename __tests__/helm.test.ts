@@ -5,6 +5,8 @@ import path from 'path';
 const mockGetJson = jest.fn<any>();
 const mockHttpGet = jest.fn<any>();
 const mockRm = jest.fn<any>();
+const mockReaddir = jest.fn<any>();
+const mockReadFile = jest.fn<any>();
 
 // Mock the dependencies BEFORE importing the code under test
 jest.unstable_mockModule('@actions/core', () => ({
@@ -34,7 +36,9 @@ jest.unstable_mockModule('@actions/http-client', () => ({
 }));
 
 jest.unstable_mockModule('fs/promises', () => ({
-  rm: mockRm
+  rm: mockRm,
+  readdir: mockReaddir,
+  readFile: mockReadFile
 }));
 
 const {
@@ -69,6 +73,10 @@ describe('installHelmPlugins', () => {
       message: {statusCode: 200},
       readBody: async () => 'mock-gpg-key-data'
     });
+    // By default, no installed plugins and no readable metadata — so the
+    // post-install duplicate check finds nothing and reports a clean install.
+    mockReaddir.mockResolvedValue([]);
+    mockReadFile.mockResolvedValue('');
   });
 
   it('should install plugin without version', async () => {
@@ -431,6 +439,58 @@ describe('installHelmPlugins', () => {
     // Should not fall back to the legacy install
     expect(mockCore.info).not.toHaveBeenCalledWith(
       expect.stringContaining('falling back to legacy install')
+    );
+  });
+
+  it('should detect a duplicate install via the plugins directory when helm is silent', async () => {
+    process.env.HELM_PLUGINS = '/tmp/helm/plugins';
+    // On Windows, `helm plugin install` exits 0 with NO duplicate error on
+    // stderr — the conflict only surfaces later at `helm plugin list`. Simulate
+    // that: clean install, but the plugins directory already holds a sibling
+    // (helm-diff/, installed by helmfile init) declaring the same name.
+    mockGetJson.mockResolvedValueOnce({
+      result: {
+        assets: [
+          {
+            name: 'helm-diff-windows-amd64.tgz',
+            browser_download_url:
+              'https://github.com/databus23/helm-diff/releases/download/v3.15.10/helm-diff-windows-amd64.tgz'
+          },
+          {
+            name: 'helm-diff-windows-amd64.tgz.prov',
+            browser_download_url:
+              'https://github.com/databus23/helm-diff/releases/download/v3.15.10/helm-diff-windows-amd64.tgz.prov'
+          }
+        ]
+      }
+    });
+    // Plugins dir already contains the sibling plus the just-installed asset dir
+    mockReaddir.mockResolvedValueOnce(['helm-diff', 'helm-diff-windows-amd64']);
+    // Both directories declare the same plugin name "diff"
+    mockReadFile.mockResolvedValue('name: diff\n');
+
+    mockExec
+      // gpg --import
+      .mockResolvedValueOnce(0)
+      // gpg --export (pubring.gpg)
+      .mockResolvedValueOnce(0)
+      // .tgz install — clean success, no duplicate reported on stderr
+      .mockResolvedValueOnce(0)
+      // helm plugin list
+      .mockResolvedValueOnce(0);
+
+    await installHelmPlugins(['https://github.com/databus23/helm-diff']);
+
+    // Should remove the just-installed asset directory (not the pre-existing one)
+    expect(mockRm).toHaveBeenCalledWith(
+      path.join('/tmp/helm/plugins', 'helm-diff-windows-amd64'),
+      {
+        recursive: true,
+        force: true
+      }
+    );
+    expect(mockCore.info).toHaveBeenCalledWith(
+      expect.stringContaining('already installed')
     );
   });
 
