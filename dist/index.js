@@ -1,7 +1,7 @@
 import './sourcemap-register.cjs';import { createRequire as __WEBPACK_EXTERNAL_createRequire } from "module";
 /******/ var __webpack_modules__ = ({
 
-/***/ 7712:
+/***/ 9379:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
@@ -141,17 +141,17 @@ class Comparator {
 
 module.exports = Comparator
 
-const parseOptions = __nccwpck_require__(5131)
-const { safeRe: re, t } = __nccwpck_require__(6102)
-const cmp = __nccwpck_require__(9647)
-const debug = __nccwpck_require__(1736)
-const SemVer = __nccwpck_require__(6644)
-const Range = __nccwpck_require__(4535)
+const parseOptions = __nccwpck_require__(356)
+const { safeRe: re, t } = __nccwpck_require__(5471)
+const cmp = __nccwpck_require__(8646)
+const debug = __nccwpck_require__(1159)
+const SemVer = __nccwpck_require__(7163)
+const Range = __nccwpck_require__(6782)
 
 
 /***/ }),
 
-/***/ 4535:
+/***/ 6782:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
@@ -254,6 +254,9 @@ class Range {
   }
 
   parseRange (range) {
+    // strip build metadata so it can't bleed into the version
+    range = range.replace(BUILDSTRIPRE, '')
+
     // memoize range parsing for performance.
     // this is a very hot path, and fully deterministic.
     const memoOpts =
@@ -370,21 +373,25 @@ class Range {
 
 module.exports = Range
 
-const LRU = __nccwpck_require__(1018)
+const LRU = __nccwpck_require__(1383)
 const cache = new LRU()
 
-const parseOptions = __nccwpck_require__(5131)
-const Comparator = __nccwpck_require__(7712)
-const debug = __nccwpck_require__(1736)
-const SemVer = __nccwpck_require__(6644)
+const parseOptions = __nccwpck_require__(356)
+const Comparator = __nccwpck_require__(9379)
+const debug = __nccwpck_require__(1159)
+const SemVer = __nccwpck_require__(7163)
 const {
   safeRe: re,
+  src,
   t,
   comparatorTrimReplace,
   tildeTrimReplace,
   caretTrimReplace,
-} = __nccwpck_require__(6102)
-const { FLAG_INCLUDE_PRERELEASE, FLAG_LOOSE } = __nccwpck_require__(9962)
+} = __nccwpck_require__(5471)
+const { FLAG_INCLUDE_PRERELEASE, FLAG_LOOSE } = __nccwpck_require__(5101)
+
+// unbounded global build-metadata stripper used by parseRange
+const BUILDSTRIPRE = new RegExp(src[t.BUILD], 'g')
 
 const isNullSet = c => c.value === '<0.0.0-0'
 const isAny = c => c.value === ''
@@ -426,6 +433,11 @@ const parseComparator = (comp, options) => {
 
 const isX = id => !id || id.toLowerCase() === 'x' || id === '*'
 
+const invalidXRangeOrder = (M, m, p) => (
+  (isX(M) && !isX(m)) ||
+  (isX(m) && p && !isX(p))
+)
+
 // ~, ~> --> * (any, kinda silly)
 // ~2, ~2.x, ~2.x.x, ~>2, ~>2.x ~>2.x.x --> >=2.0.0 <3.0.0-0
 // ~2.0, ~2.0.x, ~>2.0, ~>2.0.x --> >=2.0.0 <2.1.0-0
@@ -443,6 +455,10 @@ const replaceTildes = (comp, options) => {
 
 const replaceTilde = (comp, options) => {
   const r = options.loose ? re[t.TILDELOOSE] : re[t.TILDE]
+  // if we're including prereleases in the match, then the lower bound is
+  // -0, the lowest possible prerelease value, just like x-ranges and carets.
+  // this keeps `~1.2` equivalent to the `1.2.x` x-range it's documented as.
+  const z = options.includePrerelease ? '-0' : ''
   return comp.replace(r, (_, M, m, p, pr) => {
     debug('tilde', comp, _, M, m, p, pr)
     let ret
@@ -450,10 +466,10 @@ const replaceTilde = (comp, options) => {
     if (isX(M)) {
       ret = ''
     } else if (isX(m)) {
-      ret = `>=${M}.0.0 <${+M + 1}.0.0-0`
+      ret = `>=${M}.0.0${z} <${+M + 1}.0.0-0`
     } else if (isX(p)) {
       // ~1.2 == >=1.2.0 <1.3.0-0
-      ret = `>=${M}.${m}.0 <${M}.${+m + 1}.0-0`
+      ret = `>=${M}.${m}.0${z} <${M}.${+m + 1}.0-0`
     } else if (pr) {
       debug('replaceTilde pr', pr)
       ret = `>=${M}.${m}.${p}-${pr
@@ -522,10 +538,10 @@ const replaceCaret = (comp, options) => {
       if (M === '0') {
         if (m === '0') {
           ret = `>=${M}.${m}.${p
-          }${z} <${M}.${m}.${+p + 1}-0`
+          } <${M}.${m}.${+p + 1}-0`
         } else {
           ret = `>=${M}.${m}.${p
-          }${z} <${M}.${+m + 1}.0-0`
+          } <${M}.${+m + 1}.0-0`
         }
       } else {
         ret = `>=${M}.${m}.${p
@@ -551,6 +567,10 @@ const replaceXRange = (comp, options) => {
   const r = options.loose ? re[t.XRANGELOOSE] : re[t.XRANGE]
   return comp.replace(r, (ret, gtlt, M, m, p, pr) => {
     debug('xRange', comp, ret, gtlt, M, m, p, pr)
+    if (invalidXRangeOrder(M, m, p)) {
+      return comp
+    }
+
     const xM = isX(M)
     const xm = xM || isX(m)
     const xp = xm || isX(p)
@@ -715,17 +735,33 @@ const testSet = (set, version, options) => {
 
 /***/ }),
 
-/***/ 6644:
+/***/ 7163:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const debug = __nccwpck_require__(1736)
-const { MAX_LENGTH, MAX_SAFE_INTEGER } = __nccwpck_require__(9962)
-const { safeRe: re, t } = __nccwpck_require__(6102)
+const debug = __nccwpck_require__(1159)
+const { MAX_LENGTH, MAX_SAFE_INTEGER } = __nccwpck_require__(5101)
+const { safeRe: re, t } = __nccwpck_require__(5471)
 
-const parseOptions = __nccwpck_require__(5131)
-const { compareIdentifiers } = __nccwpck_require__(3411)
+const parseOptions = __nccwpck_require__(356)
+const { compareIdentifiers } = __nccwpck_require__(3348)
+
+const isPrereleaseIdentifier = (prerelease, identifier) => {
+  const identifiers = identifier.split('.')
+  if (identifiers.length > prerelease.length) {
+    return false
+  }
+
+  for (let i = 0; i < identifiers.length; i++) {
+    if (compareIdentifiers(prerelease[i], identifiers[i]) !== 0) {
+      return false
+    }
+  }
+
+  return true
+}
+
 class SemVer {
   constructor (version, options) {
     options = parseOptions(options)
@@ -1029,8 +1065,9 @@ class SemVer {
           if (identifierBase === false) {
             prerelease = [identifier]
           }
-          if (compareIdentifiers(this.prerelease[0], identifier) === 0) {
-            if (isNaN(this.prerelease[1])) {
+          if (isPrereleaseIdentifier(this.prerelease, identifier)) {
+            const prereleaseBase = this.prerelease[identifier.split('.').length]
+            if (isNaN(prereleaseBase)) {
               this.prerelease = prerelease
             }
           } else {
@@ -1055,12 +1092,12 @@ module.exports = SemVer
 
 /***/ }),
 
-/***/ 3590:
+/***/ 1799:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const parse = __nccwpck_require__(2080)
+const parse = __nccwpck_require__(6353)
 const clean = (version, options) => {
   const s = parse(version.trim().replace(/^[=v]+/, ''), options)
   return s ? s.version : null
@@ -1070,17 +1107,17 @@ module.exports = clean
 
 /***/ }),
 
-/***/ 9647:
+/***/ 8646:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const eq = __nccwpck_require__(273)
-const neq = __nccwpck_require__(2991)
-const gt = __nccwpck_require__(3740)
-const gte = __nccwpck_require__(6297)
-const lt = __nccwpck_require__(2115)
-const lte = __nccwpck_require__(9824)
+const eq = __nccwpck_require__(5082)
+const neq = __nccwpck_require__(4974)
+const gt = __nccwpck_require__(6599)
+const gte = __nccwpck_require__(1236)
+const lt = __nccwpck_require__(3872)
+const lte = __nccwpck_require__(6717)
 
 const cmp = (a, op, b, loose) => {
   switch (op) {
@@ -1131,14 +1168,14 @@ module.exports = cmp
 
 /***/ }),
 
-/***/ 6141:
+/***/ 5385:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const SemVer = __nccwpck_require__(6644)
-const parse = __nccwpck_require__(2080)
-const { safeRe: re, t } = __nccwpck_require__(6102)
+const SemVer = __nccwpck_require__(7163)
+const parse = __nccwpck_require__(6353)
+const { safeRe: re, t } = __nccwpck_require__(5471)
 
 const coerce = (version, options) => {
   if (version instanceof SemVer) {
@@ -1200,12 +1237,12 @@ module.exports = coerce
 
 /***/ }),
 
-/***/ 2237:
+/***/ 7648:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const SemVer = __nccwpck_require__(6644)
+const SemVer = __nccwpck_require__(7163)
 const compareBuild = (a, b, loose) => {
   const versionA = new SemVer(a, loose)
   const versionB = new SemVer(b, loose)
@@ -1216,24 +1253,24 @@ module.exports = compareBuild
 
 /***/ }),
 
-/***/ 9539:
+/***/ 6874:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const compare = __nccwpck_require__(1136)
+const compare = __nccwpck_require__(8469)
 const compareLoose = (a, b) => compare(a, b, true)
 module.exports = compareLoose
 
 
 /***/ }),
 
-/***/ 1136:
+/***/ 8469:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const SemVer = __nccwpck_require__(6644)
+const SemVer = __nccwpck_require__(7163)
 const compare = (a, b, loose) =>
   new SemVer(a, loose).compare(new SemVer(b, loose))
 
@@ -1242,12 +1279,12 @@ module.exports = compare
 
 /***/ }),
 
-/***/ 3496:
+/***/ 711:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const parse = __nccwpck_require__(2080)
+const parse = __nccwpck_require__(6353)
 
 const diff = (version1, version2) => {
   const v1 = parse(version1, null, true)
@@ -1300,7 +1337,7 @@ const diff = (version1, version2) => {
     return prefix + 'patch'
   }
 
-  // high and low are preleases
+  // high and low are prereleases
   return 'prerelease'
 }
 
@@ -1309,48 +1346,48 @@ module.exports = diff
 
 /***/ }),
 
-/***/ 273:
+/***/ 5082:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const compare = __nccwpck_require__(1136)
+const compare = __nccwpck_require__(8469)
 const eq = (a, b, loose) => compare(a, b, loose) === 0
 module.exports = eq
 
 
 /***/ }),
 
-/***/ 3740:
+/***/ 6599:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const compare = __nccwpck_require__(1136)
+const compare = __nccwpck_require__(8469)
 const gt = (a, b, loose) => compare(a, b, loose) > 0
 module.exports = gt
 
 
 /***/ }),
 
-/***/ 6297:
+/***/ 1236:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const compare = __nccwpck_require__(1136)
+const compare = __nccwpck_require__(8469)
 const gte = (a, b, loose) => compare(a, b, loose) >= 0
 module.exports = gte
 
 
 /***/ }),
 
-/***/ 1999:
+/***/ 2338:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const SemVer = __nccwpck_require__(6644)
+const SemVer = __nccwpck_require__(7163)
 
 const inc = (version, release, options, identifier, identifierBase) => {
   if (typeof (options) === 'string') {
@@ -1373,72 +1410,72 @@ module.exports = inc
 
 /***/ }),
 
-/***/ 2115:
+/***/ 3872:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const compare = __nccwpck_require__(1136)
+const compare = __nccwpck_require__(8469)
 const lt = (a, b, loose) => compare(a, b, loose) < 0
 module.exports = lt
 
 
 /***/ }),
 
-/***/ 9824:
+/***/ 6717:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const compare = __nccwpck_require__(1136)
+const compare = __nccwpck_require__(8469)
 const lte = (a, b, loose) => compare(a, b, loose) <= 0
 module.exports = lte
 
 
 /***/ }),
 
-/***/ 474:
+/***/ 8511:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const SemVer = __nccwpck_require__(6644)
+const SemVer = __nccwpck_require__(7163)
 const major = (a, loose) => new SemVer(a, loose).major
 module.exports = major
 
 
 /***/ }),
 
-/***/ 2430:
+/***/ 2603:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const SemVer = __nccwpck_require__(6644)
+const SemVer = __nccwpck_require__(7163)
 const minor = (a, loose) => new SemVer(a, loose).minor
 module.exports = minor
 
 
 /***/ }),
 
-/***/ 2991:
+/***/ 4974:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const compare = __nccwpck_require__(1136)
+const compare = __nccwpck_require__(8469)
 const neq = (a, b, loose) => compare(a, b, loose) !== 0
 module.exports = neq
 
 
 /***/ }),
 
-/***/ 2080:
+/***/ 6353:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const SemVer = __nccwpck_require__(6644)
+const SemVer = __nccwpck_require__(7163)
 const parse = (version, options, throwErrors = false) => {
   if (version instanceof SemVer) {
     return version
@@ -1458,24 +1495,24 @@ module.exports = parse
 
 /***/ }),
 
-/***/ 9629:
+/***/ 8756:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const SemVer = __nccwpck_require__(6644)
+const SemVer = __nccwpck_require__(7163)
 const patch = (a, loose) => new SemVer(a, loose).patch
 module.exports = patch
 
 
 /***/ }),
 
-/***/ 6593:
+/***/ 5714:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const parse = __nccwpck_require__(2080)
+const parse = __nccwpck_require__(6353)
 const prerelease = (version, options) => {
   const parsed = parse(version, options)
   return (parsed && parsed.prerelease.length) ? parsed.prerelease : null
@@ -1485,36 +1522,36 @@ module.exports = prerelease
 
 /***/ }),
 
-/***/ 4018:
+/***/ 2173:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const compare = __nccwpck_require__(1136)
+const compare = __nccwpck_require__(8469)
 const rcompare = (a, b, loose) => compare(b, a, loose)
 module.exports = rcompare
 
 
 /***/ }),
 
-/***/ 1749:
+/***/ 7192:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const compareBuild = __nccwpck_require__(2237)
+const compareBuild = __nccwpck_require__(7648)
 const rsort = (list, loose) => list.sort((a, b) => compareBuild(b, a, loose))
 module.exports = rsort
 
 
 /***/ }),
 
-/***/ 6326:
+/***/ 8011:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const Range = __nccwpck_require__(4535)
+const Range = __nccwpck_require__(6782)
 const satisfies = (version, range, options) => {
   try {
     range = new Range(range, options)
@@ -1528,24 +1565,79 @@ module.exports = satisfies
 
 /***/ }),
 
-/***/ 5783:
+/***/ 9872:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const compareBuild = __nccwpck_require__(2237)
+const compareBuild = __nccwpck_require__(7648)
 const sort = (list, loose) => list.sort((a, b) => compareBuild(a, b, loose))
 module.exports = sort
 
 
 /***/ }),
 
-/***/ 3769:
+/***/ 6114:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const parse = __nccwpck_require__(2080)
+const parse = __nccwpck_require__(6353)
+const constants = __nccwpck_require__(5101)
+const SemVer = __nccwpck_require__(7163)
+
+const truncate = (version, truncation, options) => {
+  if (!constants.RELEASE_TYPES.includes(truncation)) {
+    return null
+  }
+
+  const clonedVersion = cloneInputVersion(version, options)
+  return clonedVersion && doTruncation(clonedVersion, truncation)
+}
+
+const cloneInputVersion = (version, options) => {
+  const versionStringToParse = (
+    version instanceof SemVer ? version.version : version
+  )
+
+  return parse(versionStringToParse, options)
+}
+
+const doTruncation = (version, truncation) => {
+  if (isPrerelease(truncation)) {
+    return version.version
+  }
+
+  version.prerelease = []
+
+  switch (truncation) {
+    case 'major':
+      version.minor = 0
+      version.patch = 0
+      break
+    case 'minor':
+      version.patch = 0
+      break
+  }
+
+  return version.format()
+}
+
+const isPrerelease = (type) => {
+  return type.startsWith('pre')
+}
+
+module.exports = truncate
+
+
+/***/ }),
+
+/***/ 8780:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+
+
+const parse = __nccwpck_require__(6353)
 const valid = (version, options) => {
   const v = parse(version, options)
   return v ? v.version : null
@@ -1555,53 +1647,54 @@ module.exports = valid
 
 /***/ }),
 
-/***/ 885:
+/***/ 2088:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
 // just pre-load all the stuff that index.js lazily exports
-const internalRe = __nccwpck_require__(6102)
-const constants = __nccwpck_require__(9962)
-const SemVer = __nccwpck_require__(6644)
-const identifiers = __nccwpck_require__(3411)
-const parse = __nccwpck_require__(2080)
-const valid = __nccwpck_require__(3769)
-const clean = __nccwpck_require__(3590)
-const inc = __nccwpck_require__(1999)
-const diff = __nccwpck_require__(3496)
-const major = __nccwpck_require__(474)
-const minor = __nccwpck_require__(2430)
-const patch = __nccwpck_require__(9629)
-const prerelease = __nccwpck_require__(6593)
-const compare = __nccwpck_require__(1136)
-const rcompare = __nccwpck_require__(4018)
-const compareLoose = __nccwpck_require__(9539)
-const compareBuild = __nccwpck_require__(2237)
-const sort = __nccwpck_require__(5783)
-const rsort = __nccwpck_require__(1749)
-const gt = __nccwpck_require__(3740)
-const lt = __nccwpck_require__(2115)
-const eq = __nccwpck_require__(273)
-const neq = __nccwpck_require__(2991)
-const gte = __nccwpck_require__(6297)
-const lte = __nccwpck_require__(9824)
-const cmp = __nccwpck_require__(9647)
-const coerce = __nccwpck_require__(6141)
-const Comparator = __nccwpck_require__(7712)
-const Range = __nccwpck_require__(4535)
-const satisfies = __nccwpck_require__(6326)
-const toComparators = __nccwpck_require__(7583)
-const maxSatisfying = __nccwpck_require__(3036)
-const minSatisfying = __nccwpck_require__(7534)
-const minVersion = __nccwpck_require__(9725)
-const validRange = __nccwpck_require__(9282)
-const outside = __nccwpck_require__(9955)
-const gtr = __nccwpck_require__(2915)
-const ltr = __nccwpck_require__(1102)
-const intersects = __nccwpck_require__(7116)
-const simplifyRange = __nccwpck_require__(6077)
-const subset = __nccwpck_require__(1880)
+const internalRe = __nccwpck_require__(5471)
+const constants = __nccwpck_require__(5101)
+const SemVer = __nccwpck_require__(7163)
+const identifiers = __nccwpck_require__(3348)
+const parse = __nccwpck_require__(6353)
+const valid = __nccwpck_require__(8780)
+const clean = __nccwpck_require__(1799)
+const inc = __nccwpck_require__(2338)
+const diff = __nccwpck_require__(711)
+const major = __nccwpck_require__(8511)
+const minor = __nccwpck_require__(2603)
+const patch = __nccwpck_require__(8756)
+const prerelease = __nccwpck_require__(5714)
+const compare = __nccwpck_require__(8469)
+const rcompare = __nccwpck_require__(2173)
+const compareLoose = __nccwpck_require__(6874)
+const compareBuild = __nccwpck_require__(7648)
+const sort = __nccwpck_require__(9872)
+const rsort = __nccwpck_require__(7192)
+const gt = __nccwpck_require__(6599)
+const lt = __nccwpck_require__(3872)
+const eq = __nccwpck_require__(5082)
+const neq = __nccwpck_require__(4974)
+const gte = __nccwpck_require__(1236)
+const lte = __nccwpck_require__(6717)
+const cmp = __nccwpck_require__(8646)
+const coerce = __nccwpck_require__(5385)
+const truncate = __nccwpck_require__(6114)
+const Comparator = __nccwpck_require__(9379)
+const Range = __nccwpck_require__(6782)
+const satisfies = __nccwpck_require__(8011)
+const toComparators = __nccwpck_require__(4750)
+const maxSatisfying = __nccwpck_require__(5574)
+const minSatisfying = __nccwpck_require__(8595)
+const minVersion = __nccwpck_require__(1866)
+const validRange = __nccwpck_require__(4737)
+const outside = __nccwpck_require__(280)
+const gtr = __nccwpck_require__(2276)
+const ltr = __nccwpck_require__(5213)
+const intersects = __nccwpck_require__(3465)
+const simplifyRange = __nccwpck_require__(2028)
+const subset = __nccwpck_require__(1489)
 module.exports = {
   parse,
   valid,
@@ -1626,6 +1719,7 @@ module.exports = {
   lte,
   cmp,
   coerce,
+  truncate,
   Comparator,
   Range,
   satisfies,
@@ -1653,7 +1747,7 @@ module.exports = {
 
 /***/ }),
 
-/***/ 9962:
+/***/ 5101:
 /***/ ((module) => {
 
 
@@ -1697,7 +1791,7 @@ module.exports = {
 
 /***/ }),
 
-/***/ 1736:
+/***/ 1159:
 /***/ ((module) => {
 
 
@@ -1715,7 +1809,7 @@ module.exports = debug
 
 /***/ }),
 
-/***/ 3411:
+/***/ 3348:
 /***/ ((module) => {
 
 
@@ -1751,7 +1845,7 @@ module.exports = {
 
 /***/ }),
 
-/***/ 1018:
+/***/ 1383:
 /***/ ((module) => {
 
 
@@ -1800,7 +1894,7 @@ module.exports = LRUCache
 
 /***/ }),
 
-/***/ 5131:
+/***/ 356:
 /***/ ((module) => {
 
 
@@ -1824,7 +1918,7 @@ module.exports = parseOptions
 
 /***/ }),
 
-/***/ 6102:
+/***/ 5471:
 /***/ ((module, exports, __nccwpck_require__) => {
 
 
@@ -1833,8 +1927,8 @@ const {
   MAX_SAFE_COMPONENT_LENGTH,
   MAX_SAFE_BUILD_LENGTH,
   MAX_LENGTH,
-} = __nccwpck_require__(9962)
-const debug = __nccwpck_require__(1736)
+} = __nccwpck_require__(5101)
+const debug = __nccwpck_require__(1159)
 exports = module.exports = {}
 
 // The actual regexps go on exports.re
@@ -1907,8 +2001,8 @@ createToken('MAINVERSIONLOOSE', `(${src[t.NUMERICIDENTIFIERLOOSE]})\\.` +
 
 // ## Pre-release Version Identifier
 // A numeric identifier, or a non-numeric identifier.
-// Non-numberic identifiers include numberic identifiers but can be longer.
-// Therefore non-numberic identifiers must go first.
+// Non-numeric identifiers include numeric identifiers but can be longer.
+// Therefore non-numeric identifiers must go first.
 
 createToken('PRERELEASEIDENTIFIER', `(?:${src[t.NONNUMERICIDENTIFIER]
 }|${src[t.NUMERICIDENTIFIER]})`)
@@ -1965,7 +2059,7 @@ createToken('LOOSE', `^${src[t.LOOSEPLAIN]}$`)
 createToken('GTLT', '((?:<|>)?=?)')
 
 // Something like "2.*" or "1.2.x".
-// Note that "x.x" is a valid xRange identifer, meaning "any version"
+// Note that "x.x" is a valid xRange identifier, meaning "any version"
 // Only the first item is strictly required.
 createToken('XRANGEIDENTIFIERLOOSE', `${src[t.NUMERICIDENTIFIERLOOSE]}|x|X|\\*`)
 createToken('XRANGEIDENTIFIER', `${src[t.NUMERICIDENTIFIER]}|x|X|\\*`)
@@ -2054,25 +2148,25 @@ createToken('GTE0PRE', '^\\s*>=\\s*0\\.0\\.0-0\\s*$')
 
 /***/ }),
 
-/***/ 2915:
+/***/ 2276:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
 // Determine if version is greater than all the versions possible in the range.
-const outside = __nccwpck_require__(9955)
+const outside = __nccwpck_require__(280)
 const gtr = (version, range, options) => outside(version, range, '>', options)
 module.exports = gtr
 
 
 /***/ }),
 
-/***/ 7116:
+/***/ 3465:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const Range = __nccwpck_require__(4535)
+const Range = __nccwpck_require__(6782)
 const intersects = (r1, r2, options) => {
   r1 = new Range(r1, options)
   r2 = new Range(r2, options)
@@ -2083,12 +2177,12 @@ module.exports = intersects
 
 /***/ }),
 
-/***/ 1102:
+/***/ 5213:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const outside = __nccwpck_require__(9955)
+const outside = __nccwpck_require__(280)
 // Determine if version is less than all the versions possible in the range
 const ltr = (version, range, options) => outside(version, range, '<', options)
 module.exports = ltr
@@ -2096,13 +2190,13 @@ module.exports = ltr
 
 /***/ }),
 
-/***/ 3036:
+/***/ 5574:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const SemVer = __nccwpck_require__(6644)
-const Range = __nccwpck_require__(4535)
+const SemVer = __nccwpck_require__(7163)
+const Range = __nccwpck_require__(6782)
 
 const maxSatisfying = (versions, range, options) => {
   let max = null
@@ -2130,13 +2224,13 @@ module.exports = maxSatisfying
 
 /***/ }),
 
-/***/ 7534:
+/***/ 8595:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const SemVer = __nccwpck_require__(6644)
-const Range = __nccwpck_require__(4535)
+const SemVer = __nccwpck_require__(7163)
+const Range = __nccwpck_require__(6782)
 const minSatisfying = (versions, range, options) => {
   let min = null
   let minSV = null
@@ -2163,14 +2257,14 @@ module.exports = minSatisfying
 
 /***/ }),
 
-/***/ 9725:
+/***/ 1866:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const SemVer = __nccwpck_require__(6644)
-const Range = __nccwpck_require__(4535)
-const gt = __nccwpck_require__(3740)
+const SemVer = __nccwpck_require__(7163)
+const Range = __nccwpck_require__(6782)
+const gt = __nccwpck_require__(6599)
 
 const minVersion = (range, loose) => {
   range = new Range(range, loose)
@@ -2233,20 +2327,20 @@ module.exports = minVersion
 
 /***/ }),
 
-/***/ 9955:
+/***/ 280:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const SemVer = __nccwpck_require__(6644)
-const Comparator = __nccwpck_require__(7712)
+const SemVer = __nccwpck_require__(7163)
+const Comparator = __nccwpck_require__(9379)
 const { ANY } = Comparator
-const Range = __nccwpck_require__(4535)
-const satisfies = __nccwpck_require__(6326)
-const gt = __nccwpck_require__(3740)
-const lt = __nccwpck_require__(2115)
-const lte = __nccwpck_require__(9824)
-const gte = __nccwpck_require__(6297)
+const Range = __nccwpck_require__(6782)
+const satisfies = __nccwpck_require__(8011)
+const gt = __nccwpck_require__(6599)
+const lt = __nccwpck_require__(3872)
+const lte = __nccwpck_require__(6717)
+const gte = __nccwpck_require__(1236)
 
 const outside = (version, range, hilo, options) => {
   version = new SemVer(version, options)
@@ -2322,7 +2416,7 @@ module.exports = outside
 
 /***/ }),
 
-/***/ 6077:
+/***/ 2028:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
@@ -2330,8 +2424,8 @@ module.exports = outside
 // given a set of versions and a range, create a "simplified" range
 // that includes the same versions that the original range does
 // If the original range is shorter than the simplified one, return that.
-const satisfies = __nccwpck_require__(6326)
-const compare = __nccwpck_require__(1136)
+const satisfies = __nccwpck_require__(8011)
+const compare = __nccwpck_require__(8469)
 module.exports = (versions, range, options) => {
   const set = []
   let first = null
@@ -2378,16 +2472,16 @@ module.exports = (versions, range, options) => {
 
 /***/ }),
 
-/***/ 1880:
+/***/ 1489:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const Range = __nccwpck_require__(4535)
-const Comparator = __nccwpck_require__(7712)
+const Range = __nccwpck_require__(6782)
+const Comparator = __nccwpck_require__(9379)
 const { ANY } = Comparator
-const satisfies = __nccwpck_require__(6326)
-const compare = __nccwpck_require__(1136)
+const satisfies = __nccwpck_require__(8011)
+const compare = __nccwpck_require__(8469)
 
 // Complex range `r1 || r2 || ...` is a subset of `R1 || R2 || ...` iff:
 // - Every simple range `r1, r2, ...` is a null set, OR
@@ -2421,7 +2515,7 @@ const compare = __nccwpck_require__(1136)
 // - If LT
 //   - If LT.semver is greater than any < or <= comp in C, return false
 //   - If LT is <=, and LT.semver does not satisfy every C, return false
-//   - If GT.semver has a prerelease, and not in prerelease mode
+//   - If LT.semver has a prerelease, and not in prerelease mode
 //     - If no C has a prerelease and the LT.semver tuple, return false
 // - Else return true
 
@@ -2557,7 +2651,7 @@ const simpleSubset = (sub, dom, options) => {
         if (higher === c && higher !== gt) {
           return false
         }
-      } else if (gt.operator === '>=' && !satisfies(gt.semver, String(c), options)) {
+      } else if (gt.operator === '>=' && !c.test(gt.semver)) {
         return false
       }
     }
@@ -2575,7 +2669,7 @@ const simpleSubset = (sub, dom, options) => {
         if (lower === c && lower !== lt) {
           return false
         }
-      } else if (lt.operator === '<=' && !satisfies(lt.semver, String(c), options)) {
+      } else if (lt.operator === '<=' && !c.test(lt.semver)) {
         return false
       }
     }
@@ -2634,12 +2728,12 @@ module.exports = subset
 
 /***/ }),
 
-/***/ 7583:
+/***/ 4750:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const Range = __nccwpck_require__(4535)
+const Range = __nccwpck_require__(6782)
 
 // Mostly just for testing and legacy API reasons
 const toComparators = (range, options) =>
@@ -2651,12 +2745,12 @@ module.exports = toComparators
 
 /***/ }),
 
-/***/ 9282:
+/***/ 4737:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 
 
-const Range = __nccwpck_require__(4535)
+const Range = __nccwpck_require__(6782)
 const validRange = (range, options) => {
   try {
     // Return '*' instead of '' so that truthiness works.
@@ -6002,7 +6096,13 @@ function processHeader (request, key, val) {
       } else if (typeof val[i] === 'object') {
         throw new InvalidArgumentError(`invalid ${key} header`)
       } else {
-        arr.push(`${val[i]}`)
+        // Coerce primitives (and reject unsafe coercions such as functions
+        // with a crafted toString/Symbol.toPrimitive).
+        const str = `${val[i]}`
+        if (!isValidHeaderValue(str)) {
+          throw new InvalidArgumentError(`invalid ${key} header`)
+        }
+        arr.push(str)
       }
     }
     val = arr
@@ -6013,7 +6113,12 @@ function processHeader (request, key, val) {
   } else if (val === null) {
     val = ''
   } else {
+    // Coerce primitives (and reject unsafe coercions such as functions
+    // with a crafted toString/Symbol.toPrimitive).
     val = `${val}`
+    if (!isValidHeaderValue(val)) {
+      throw new InvalidArgumentError(`invalid ${key} header`)
+    }
   }
 
   if (headerName === 'host') {
@@ -7385,6 +7490,7 @@ const {
   RequestContentLengthMismatchError,
   ResponseContentLengthMismatchError,
   RequestAbortedError,
+  InvalidArgumentError,
   HeadersTimeoutError,
   HeadersOverflowError,
   SocketError,
@@ -8368,8 +8474,16 @@ function writeH1 (client, request) {
     }
     body = bodyStream.stream
     contentLength = bodyStream.length
-  } else if (util.isBlobLike(body) && request.contentType == null && body.type) {
-    headers.push('content-type', body.type)
+  } else if (util.isBlobLike(body) && request.contentType == null) {
+    const contentType = body.type
+    if (contentType) {
+      const contentTypeValue = `${contentType}`
+      if (!util.isValidHeaderValue(contentTypeValue)) {
+        util.errorRequest(client, request, new InvalidArgumentError('invalid content-type header'))
+        return false
+      }
+      headers.push('content-type', contentTypeValue)
+    }
   }
 
   if (body && typeof body.read === 'function') {
@@ -11842,6 +11956,28 @@ function calculateRetryAfterHeader (retryAfter) {
   return new Date(retryAfter).getTime() - current
 }
 
+function validatePartialResponseContentLength (headers, range, statusCode, retryCount) {
+  const contentLength = headers['content-length']
+  if (contentLength == null) {
+    return null
+  }
+
+  if (!Number.isFinite(range.start) || !Number.isFinite(range.end)) {
+    return null
+  }
+
+  const length = Number(contentLength)
+  const expectedLength = range.end - range.start + 1
+  if (!Number.isFinite(length) || length !== expectedLength) {
+    return new RequestRetryError('Content-Length mismatch', statusCode, {
+      headers,
+      data: { count: retryCount }
+    })
+  }
+
+  return null
+}
+
 class RetryHandler {
   constructor (opts, handlers) {
     const { retryOptions, ...dispatchOpts } = opts
@@ -12056,6 +12192,12 @@ class RetryHandler {
         return false
       }
 
+      const contentLengthError = validatePartialResponseContentLength(headers, contentRange, statusCode, this.retryCount)
+      if (contentLengthError != null) {
+        this.abort(contentLengthError)
+        return false
+      }
+
       const { start, size, end = size - 1 } = contentRange
 
       assert(this.start === start, 'content-range mismatch')
@@ -12077,6 +12219,12 @@ class RetryHandler {
             resume,
             statusMessage
           )
+        }
+
+        const contentLengthError = validatePartialResponseContentLength(headers, range, statusCode, this.retryCount)
+        if (contentLengthError != null) {
+          this.abort(contentLengthError)
+          return false
         }
 
         const { start, size, end = size - 1 } = range
@@ -16323,7 +16471,7 @@ function validateCookiePath (path) {
 
     if (
       code < 0x20 || // exclude CTLs (0-31)
-      code === 0x7F || // DEL
+      code > 0x7E || // exclude DEL and non-ascii
       code === 0x3B // ;
     ) {
       throw new Error('Invalid cookie path')
@@ -16332,16 +16480,80 @@ function validateCookiePath (path) {
 }
 
 /**
- * I have no idea why these values aren't allowed to be honest,
- * but Deno tests these. - Khafra
+ * <let-dig> ::= <letter> | <digit>
+ *
+ * <letter> ::= any one of the 52 alphabetic characters A through Z in
+ * upper case and a through z in lower case
+ *
+ * <digit> ::= any one of the ten digits 0 through 9r
+ *
+ * @see https://www.rfc-editor.org/rfc/rfc1034#section-3.5
+ * @param {number} code
+ */
+function isLetterOrDigit (code) {
+  return (
+    (code >= 0x30 && code <= 0x39) || // 0-9
+    (code >= 0x41 && code <= 0x5A) || // A-Z
+    (code >= 0x61 && code <= 0x7A) // a-z
+  )
+}
+
+/**
+ * Validates a cookie domain against the "preferred name syntax".
+ *
+ * <domain>      ::= <subdomain> | " "
+ * <subdomain>   ::= <label> | <subdomain> "." <label>
+ * <label>       ::= <let-dig> [ [ <ldh-str> ] <let-dig> ]
+ * <ldh-str>     ::= <let-dig-hyp> | <let-dig-hyp> <ldh-str>
+ * <let-dig-hyp> ::= <let-dig> | "-"
+ *
+ * @see https://www.rfc-editor.org/rfc/rfc1034#section-3.5
+ * @see https://www.rfc-editor.org/rfc/rfc1123#section-2.1
+ * @see https://www.rfc-editor.org/rfc/rfc1035#section-2.3.4
  * @param {string} domain
  */
 function validateCookieDomain (domain) {
-  if (
-    domain.startsWith('-') ||
-    domain.endsWith('.') ||
-    domain.endsWith('-')
-  ) {
+  // <domain> ::= <subdomain> | " "
+  if (domain === ' ') {
+    return
+  }
+
+  if (domain.length > 255) {
+    throw new Error('Invalid cookie domain')
+  }
+
+  let labelLength = 0
+
+  for (let i = 0; i < domain.length; ++i) {
+    const code = domain.charCodeAt(i)
+
+    if (code === 0x2E) {
+      if (labelLength === 0) {
+        throw new Error('Invalid cookie domain')
+      }
+
+      if (domain.charCodeAt(i - 1) === 0x2D) { // "-"
+        throw new Error('Invalid cookie domain')
+      }
+
+      labelLength = 0
+      continue
+    }
+
+    if (labelLength === 0 && !isLetterOrDigit(code)) {
+      throw new Error('Invalid cookie domain')
+    }
+
+    if (!isLetterOrDigit(code) && code !== 0x2D) { // "-"
+      throw new Error('Invalid cookie domain')
+    }
+
+    if (++labelLength > 63) {
+      throw new Error('Invalid cookie domain')
+    }
+  }
+
+  if (labelLength === 0 || domain.charCodeAt(domain.length - 1) === 0x2D) { // "-"
     throw new Error('Invalid cookie domain')
   }
 }
@@ -16484,7 +16696,13 @@ function stringify (cookie) {
 
     const [key, ...value] = part.split('=')
 
-    out.push(`${key.trim()}=${value.join('=')}`)
+    const trimmedKey = key.trim()
+    const joinedValue = value.join('=')
+
+    validateCookieName(trimmedKey)
+    validateCookieValue(joinedValue)
+
+    out.push(`${trimmedKey}=${joinedValue}`)
   }
 
   return out.join('; ')
@@ -33803,8 +34021,8 @@ function getIDToken(aud) {
 //# sourceMappingURL=core.js.map
 ;// CONCATENATED MODULE: external "fs/promises"
 const promises_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("fs/promises");
-// EXTERNAL MODULE: ./node_modules/@actions/tool-cache/node_modules/semver/index.js
-var node_modules_semver = __nccwpck_require__(885);
+// EXTERNAL MODULE: ./node_modules/semver/index.js
+var node_modules_semver = __nccwpck_require__(2088);
 ;// CONCATENATED MODULE: ./node_modules/@actions/tool-cache/lib/manifest.js
 var manifest_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
@@ -34737,27 +34955,16 @@ async function getHelmPluginsDir() {
         return null;
     }
 }
-async function cleanupPartialPluginInstall(assetUrl) {
-    const pluginsDir = await getHelmPluginsDir();
-    if (!pluginsDir)
-        return;
-    let assetName = '';
+async function snapshotPluginsDir() {
+    const dir = await getHelmPluginsDir();
+    if (!dir)
+        return { dir: null, entries: [] };
     try {
-        assetName = external_path_default().basename(decodeURIComponent(new URL(assetUrl).pathname));
-    }
-    catch {
-        assetName = external_path_default().basename(decodeURIComponent(assetUrl).split('/').pop() ?? '');
-    }
-    if (!assetName.toLowerCase().endsWith('.tgz'))
-        return;
-    try {
-        await promises_namespaceObject.rm(external_path_default().join(pluginsDir, assetName.replace(/\.tgz$/i, '')), {
-            recursive: true,
-            force: true
-        });
+        return { dir, entries: await promises_namespaceObject.readdir(dir) };
     }
     catch (error) {
-        warning(`Failed to clean up partial plugin install for ${assetName}: ${error}`);
+        warning(`Failed to list Helm plugin directory ${dir}: ${error}`);
+        return { dir, entries: [] };
     }
 }
 // Read the declared plugin name from a plugin directory's metadata file.
@@ -34776,52 +34983,73 @@ async function readPluginName(pluginDir) {
     }
     return null;
 }
-// Helm does not consistently report a duplicate plugin name during install
-// (it is silent on Windows and only fails later at `helm plugin list`). After a
-// successful .tgz install, verify the just-created directory does not collide
-// with a pre-existing plugin (same name declared by a sibling directory). If it
-// does, remove the directory we just created from the .tgz asset and return
-// true so the caller can treat the plugin as already installed.
-async function removeDuplicateAssetInstall(assetUrl) {
-    const pluginsDir = await getHelmPluginsDir();
-    if (!pluginsDir)
-        return false;
-    let assetDirName = '';
+// Remove plugin directories that a failed `helm plugin install` attempt left
+// behind, so retries and the legacy fallback start from a clean state. Helm
+// extracts an asset into a directory named after the archive's root folder
+// (e.g. "diff"), not after the asset file name, so detect the new directories
+// by diffing directory listings taken before and after the attempt.
+async function removeCreatedPluginDirs(snapshot, reason) {
+    const { dir, entries } = snapshot;
+    if (!dir)
+        return;
+    let after = [];
     try {
-        assetDirName = external_path_default().basename(decodeURIComponent(new URL(assetUrl).pathname))
-            .replace(/\.tgz$/i, '');
+        after = await promises_namespaceObject.readdir(dir);
+    }
+    catch {
+        return;
+    }
+    for (const entry of after.filter(e => !entries.includes(e))) {
+        try {
+            await promises_namespaceObject.rm(external_path_default().join(dir, entry), { recursive: true, force: true });
+            info(`Removed partial plugin directory ${entry} (${reason})`);
+        }
+        catch (error) {
+            warning(`Failed to remove partial plugin directory ${entry}: ${error}`);
+        }
+    }
+}
+// After a successful .tgz install, Helm may silently leave a second directory
+// declaring the same plugin name as a pre-existing one (it does not fail the
+// install; it only errors later at `helm plugin list`). This happens e.g. when
+// `helmfile init` already installed a plugin: helmfile extracts the archive
+// under the repo name ("helm-diff/") while a Helm v4 .tgz asset extracts under
+// the plugin name ("diff/"), and both metadata files declare name "diff".
+// Keep the freshly installed package — the release this action resolved, i.e.
+// the latest version — and remove the pre-existing duplicate so exactly one
+// directory remains per plugin name.
+async function removePreexistingDuplicate(snapshot) {
+    const { dir, entries } = snapshot;
+    if (!dir)
+        return false;
+    let after = [];
+    try {
+        after = await promises_namespaceObject.readdir(dir);
     }
     catch {
         return false;
     }
-    if (!assetDirName)
-        return false;
-    const assetPluginName = await readPluginName(external_path_default().join(pluginsDir, assetDirName));
-    if (!assetPluginName)
-        return false;
-    let entries = [];
-    try {
-        entries = await promises_namespaceObject.readdir(pluginsDir);
-    }
-    catch {
-        return false;
-    }
-    for (const entry of entries) {
-        if (entry === assetDirName)
+    const created = after.filter(e => !entries.includes(e));
+    for (const createdEntry of created) {
+        const createdName = await readPluginName(external_path_default().join(dir, createdEntry));
+        if (!createdName)
             continue;
-        const siblingName = await readPluginName(external_path_default().join(pluginsDir, entry));
-        if (siblingName === assetPluginName) {
+        for (const priorEntry of entries) {
+            const priorName = await readPluginName(external_path_default().join(dir, priorEntry));
+            if (priorName !== createdName)
+                continue;
             try {
-                await promises_namespaceObject.rm(external_path_default().join(pluginsDir, assetDirName), {
+                await promises_namespaceObject.rm(external_path_default().join(dir, priorEntry), {
                     recursive: true,
                     force: true
                 });
+                info(`Removed pre-existing plugin directory ${priorEntry}, superseded by newly installed "${createdName}"`);
+                return true;
             }
             catch (error) {
-                warning(`Failed to remove duplicate plugin directory ${assetDirName}: ${error}`);
+                warning(`Failed to remove duplicate plugin directory ${priorEntry}: ${error}`);
                 return false;
             }
-            return true;
         }
     }
     return false;
@@ -35000,14 +35228,17 @@ async function installHelmPlugins(plugins) {
                             }
                         }
                     };
+                    const beforeInstall = await snapshotPluginsDir();
                     let eCode = await exec_exec('helm', ['plugin', 'install', assetUrl], assetOptions);
                     let result = classifyPluginInstall(eCode, assetStderr);
                     let unverified = false;
+                    let effectiveSnapshot = beforeInstall;
                     // Verification failed (e.g., GPG key missing/wrong) — retry with
                     // --verify=false. The .tgz still registers as a proper v4 plugin.
                     if (result === 'verify-failed') {
                         warning(`Verification failed for ${assetUrl}, retrying with --verify=false`);
-                        await cleanupPartialPluginInstall(assetUrl);
+                        await removeCreatedPluginDirs(beforeInstall, 'failed verification');
+                        effectiveSnapshot = await snapshotPluginsDir();
                         assetStderr = '';
                         eCode = await exec_exec('helm', ['plugin', 'install', '--verify=false', assetUrl], assetOptions);
                         result = classifyPluginInstall(eCode, assetStderr);
@@ -35018,12 +35249,14 @@ async function installHelmPlugins(plugins) {
                         // Helm does not consistently report a duplicate plugin during
                         // install (e.g. on Windows), so verify via the plugins directory
                         // that the install did not collide with a pre-existing plugin.
-                        if (await removeDuplicateAssetInstall(assetUrl)) {
-                            info(`Plugin from ${assetUrl} already installed; removed duplicate directory${suffix}`);
-                        }
-                        else {
-                            info(`Installed Helm v4 plugin from ${assetUrl}${suffix}`);
-                        }
+                        // The freshly installed package wins: it is the release this
+                        // action resolved, i.e. the latest version, so any pre-existing
+                        // copy of the same plugin is stale and gets removed.
+                        const replaced = await removePreexistingDuplicate(effectiveSnapshot);
+                        const replacedNote = replaced
+                            ? ' (replaced pre-existing duplicate)'
+                            : '';
+                        info(`Installed Helm v4 plugin from ${assetUrl}${suffix}${replacedNote}`);
                         installed = true;
                     }
                     else if (result === 'exists') {
@@ -35031,7 +35264,7 @@ async function installHelmPlugins(plugins) {
                         installed = true;
                     }
                     else {
-                        await cleanupPartialPluginInstall(assetUrl);
+                        await removeCreatedPluginDirs(beforeInstall, 'failed install');
                         warning(`Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`);
                     }
                     if (installed) {

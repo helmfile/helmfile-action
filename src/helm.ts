@@ -107,30 +107,18 @@ async function getHelmPluginsDir(): Promise<string | null> {
   }
 }
 
-async function cleanupPartialPluginInstall(assetUrl: string): Promise<void> {
-  const pluginsDir = await getHelmPluginsDir();
-  if (!pluginsDir) return;
+// A listing of the Helm plugins directory, taken before/after a
+// `helm plugin install` attempt to detect what the attempt changed.
+type PluginsDirSnapshot = {dir: string | null; entries: string[]};
 
-  let assetName = '';
+async function snapshotPluginsDir(): Promise<PluginsDirSnapshot> {
+  const dir = await getHelmPluginsDir();
+  if (!dir) return {dir: null, entries: []};
   try {
-    assetName = path.basename(decodeURIComponent(new URL(assetUrl).pathname));
-  } catch {
-    assetName = path.basename(
-      decodeURIComponent(assetUrl).split('/').pop() ?? ''
-    );
-  }
-
-  if (!assetName.toLowerCase().endsWith('.tgz')) return;
-
-  try {
-    await fs.rm(path.join(pluginsDir, assetName.replace(/\.tgz$/i, '')), {
-      recursive: true,
-      force: true
-    });
+    return {dir, entries: await fs.readdir(dir)};
   } catch (error) {
-    core.warning(
-      `Failed to clean up partial plugin install for ${assetName}: ${error}`
-    );
+    core.warning(`Failed to list Helm plugin directory ${dir}: ${error}`);
+    return {dir, entries: []};
   }
 }
 
@@ -149,54 +137,82 @@ async function readPluginName(pluginDir: string): Promise<string | null> {
   return null;
 }
 
-// Helm does not consistently report a duplicate plugin name during install
-// (it is silent on Windows and only fails later at `helm plugin list`). After a
-// successful .tgz install, verify the just-created directory does not collide
-// with a pre-existing plugin (same name declared by a sibling directory). If it
-// does, remove the directory we just created from the .tgz asset and return
-// true so the caller can treat the plugin as already installed.
-async function removeDuplicateAssetInstall(assetUrl: string): Promise<boolean> {
-  const pluginsDir = await getHelmPluginsDir();
-  if (!pluginsDir) return false;
+// Remove plugin directories that a failed `helm plugin install` attempt left
+// behind, so retries and the legacy fallback start from a clean state. Helm
+// extracts an asset into a directory named after the archive's root folder
+// (e.g. "diff"), not after the asset file name, so detect the new directories
+// by diffing directory listings taken before and after the attempt.
+async function removeCreatedPluginDirs(
+  snapshot: PluginsDirSnapshot,
+  reason: string
+): Promise<void> {
+  const {dir, entries} = snapshot;
+  if (!dir) return;
 
-  let assetDirName = '';
+  let after: string[] = [];
   try {
-    assetDirName = path
-      .basename(decodeURIComponent(new URL(assetUrl).pathname))
-      .replace(/\.tgz$/i, '');
+    after = await fs.readdir(dir);
+  } catch {
+    return;
+  }
+
+  for (const entry of after.filter(e => !entries.includes(e))) {
+    try {
+      await fs.rm(path.join(dir, entry), {recursive: true, force: true});
+      core.info(`Removed partial plugin directory ${entry} (${reason})`);
+    } catch (error) {
+      core.warning(
+        `Failed to remove partial plugin directory ${entry}: ${error}`
+      );
+    }
+  }
+}
+
+// After a successful .tgz install, Helm may silently leave a second directory
+// declaring the same plugin name as a pre-existing one (it does not fail the
+// install; it only errors later at `helm plugin list`). This happens e.g. when
+// `helmfile init` already installed a plugin: helmfile extracts the archive
+// under the repo name ("helm-diff/") while a Helm v4 .tgz asset extracts under
+// the plugin name ("diff/"), and both metadata files declare name "diff".
+// Keep the freshly installed package — the release this action resolved, i.e.
+// the latest version — and remove the pre-existing duplicate so exactly one
+// directory remains per plugin name.
+async function removePreexistingDuplicate(
+  snapshot: PluginsDirSnapshot
+): Promise<boolean> {
+  const {dir, entries} = snapshot;
+  if (!dir) return false;
+
+  let after: string[] = [];
+  try {
+    after = await fs.readdir(dir);
   } catch {
     return false;
   }
-  if (!assetDirName) return false;
+  const created = after.filter(e => !entries.includes(e));
 
-  const assetPluginName = await readPluginName(
-    path.join(pluginsDir, assetDirName)
-  );
-  if (!assetPluginName) return false;
+  for (const createdEntry of created) {
+    const createdName = await readPluginName(path.join(dir, createdEntry));
+    if (!createdName) continue;
 
-  let entries: string[] = [];
-  try {
-    entries = await fs.readdir(pluginsDir);
-  } catch {
-    return false;
-  }
-
-  for (const entry of entries) {
-    if (entry === assetDirName) continue;
-    const siblingName = await readPluginName(path.join(pluginsDir, entry));
-    if (siblingName === assetPluginName) {
+    for (const priorEntry of entries) {
+      const priorName = await readPluginName(path.join(dir, priorEntry));
+      if (priorName !== createdName) continue;
       try {
-        await fs.rm(path.join(pluginsDir, assetDirName), {
+        await fs.rm(path.join(dir, priorEntry), {
           recursive: true,
           force: true
         });
+        core.info(
+          `Removed pre-existing plugin directory ${priorEntry}, superseded by newly installed "${createdName}"`
+        );
+        return true;
       } catch (error) {
         core.warning(
-          `Failed to remove duplicate plugin directory ${assetDirName}: ${error}`
+          `Failed to remove duplicate plugin directory ${priorEntry}: ${error}`
         );
         return false;
       }
-      return true;
     }
   }
   return false;
@@ -206,7 +222,7 @@ async function removeDuplicateAssetInstall(assetUrl: string): Promise<boolean> {
 // stderr, so the v4 .tgz install loop can react consistently across retries.
 // Duplicate-name conflicts are intentionally NOT classified here: Helm does not
 // report them consistently during install (silent on Windows), so they are
-// detected post-install via removeDuplicateAssetInstall() instead.
+// detected post-install via removePreexistingDuplicate() instead.
 type PluginInstallResult = 'installed' | 'exists' | 'verify-failed' | 'failed';
 
 function classifyPluginInstall(
@@ -443,6 +459,8 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
             }
           };
 
+          const beforeInstall = await snapshotPluginsDir();
+
           let eCode = await exec(
             'helm',
             ['plugin', 'install', assetUrl],
@@ -451,6 +469,7 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
 
           let result = classifyPluginInstall(eCode, assetStderr);
           let unverified = false;
+          let effectiveSnapshot = beforeInstall;
 
           // Verification failed (e.g., GPG key missing/wrong) — retry with
           // --verify=false. The .tgz still registers as a proper v4 plugin.
@@ -458,7 +477,8 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
             core.warning(
               `Verification failed for ${assetUrl}, retrying with --verify=false`
             );
-            await cleanupPartialPluginInstall(assetUrl);
+            await removeCreatedPluginDirs(beforeInstall, 'failed verification');
+            effectiveSnapshot = await snapshotPluginsDir();
             assetStderr = '';
             eCode = await exec(
               'helm',
@@ -474,19 +494,23 @@ export async function installHelmPlugins(plugins: string[]): Promise<void> {
             // Helm does not consistently report a duplicate plugin during
             // install (e.g. on Windows), so verify via the plugins directory
             // that the install did not collide with a pre-existing plugin.
-            if (await removeDuplicateAssetInstall(assetUrl)) {
-              core.info(
-                `Plugin from ${assetUrl} already installed; removed duplicate directory${suffix}`
-              );
-            } else {
-              core.info(`Installed Helm v4 plugin from ${assetUrl}${suffix}`);
-            }
+            // The freshly installed package wins: it is the release this
+            // action resolved, i.e. the latest version, so any pre-existing
+            // copy of the same plugin is stale and gets removed.
+            const replaced =
+              await removePreexistingDuplicate(effectiveSnapshot);
+            const replacedNote = replaced
+              ? ' (replaced pre-existing duplicate)'
+              : '';
+            core.info(
+              `Installed Helm v4 plugin from ${assetUrl}${suffix}${replacedNote}`
+            );
             installed = true;
           } else if (result === 'exists') {
             core.info(`Plugin from ${assetUrl} already exists`);
             installed = true;
           } else {
-            await cleanupPartialPluginInstall(assetUrl);
+            await removeCreatedPluginDirs(beforeInstall, 'failed install');
             core.warning(
               `Failed to install Helm v4 plugin from ${assetUrl}: ${assetStderr}`
             );

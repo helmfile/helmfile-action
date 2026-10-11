@@ -383,33 +383,36 @@ describe('installHelmPlugins', () => {
     );
   });
 
-  it('should remove the duplicate plugin directory when the plugin is already installed', async () => {
+  it('should remove the pre-existing duplicate and keep the latest .tgz install', async () => {
     process.env.HELM_PLUGINS = '/tmp/helm/plugins';
-    // helmfile init already installed the "diff" plugin into helm-diff/. The v4
-    // .tgz install extracts into helm-diff-linux-amd64/, declaring the same name.
-    // Helm does not report this consistently during install (silent on Windows),
-    // so detection is done via the plugins directory — this test covers both the
-    // stderr-reporting (macOS) and silent (Windows) cases since they share one
+    // Mirrors the macOS CI failure: "helmfile init" installed helm-diff
+    // v3.15.13 into helm-diff/, then the latest v4 .tgz asset extracts into
+    // diff/. Helm installs silently despite the collision (it only errors
+    // later at `helm plugin list`), on every OS — this test covers the shared
     // OS-independent code path.
     mockGetJson.mockResolvedValueOnce({
       result: {
         assets: [
           {
-            name: 'helm-diff-linux-amd64.tgz',
+            name: 'diff-3.15.15-macos-arm64.tgz',
             browser_download_url:
-              'https://github.com/databus23/helm-diff/releases/download/v3.15.10/helm-diff-linux-amd64.tgz'
+              'https://github.com/databus23/helm-diff/releases/download/v3.15.15/diff-3.15.15-macos-arm64.tgz'
           },
           {
-            name: 'helm-diff-linux-amd64.tgz.prov',
+            name: 'diff-3.15.15-macos-arm64.tgz.prov',
             browser_download_url:
-              'https://github.com/databus23/helm-diff/releases/download/v3.15.10/helm-diff-linux-amd64.tgz.prov'
+              'https://github.com/databus23/helm-diff/releases/download/v3.15.15/diff-3.15.15-macos-arm64.tgz.prov'
           }
         ]
       }
     });
-    // Plugins dir holds the pre-existing sibling plus the just-installed asset
-    mockReaddir.mockResolvedValueOnce(['helm-diff', 'helm-diff-linux-amd64']);
-    // metadata.yaml for the asset dir, then for the sibling dir — both "diff"
+    // Before the install only the stale copy exists; afterwards the freshly
+    // extracted directory joins it — Helm names the directory after the
+    // archive's root folder, not the asset file name.
+    mockReaddir
+      .mockResolvedValueOnce(['helm-diff'])
+      .mockResolvedValueOnce(['helm-diff', 'diff']);
+    // metadata.yaml for the fresh dir, then for the stale sibling — both "diff"
     mockReadFile
       .mockResolvedValueOnce('name: diff\n')
       .mockResolvedValueOnce('name: diff\n');
@@ -419,16 +422,16 @@ describe('installHelmPlugins', () => {
       .mockResolvedValueOnce(0)
       // gpg --export (pubring.gpg)
       .mockResolvedValueOnce(0)
-      // .tgz install — clean success
+      // .tgz install — exits 0 despite the duplicate
       .mockResolvedValueOnce(0)
       // helm plugin list
       .mockResolvedValueOnce(0);
 
     await installHelmPlugins(['https://github.com/databus23/helm-diff']);
 
-    // Should remove the duplicate directory created from the .tgz asset
+    // The stale copy is removed and the latest .tgz install is kept
     expect(mockRm).toHaveBeenCalledWith(
-      path.join('/tmp/helm/plugins', 'helm-diff-linux-amd64'),
+      path.join('/tmp/helm/plugins', 'helm-diff'),
       {
         recursive: true,
         force: true
@@ -436,7 +439,7 @@ describe('installHelmPlugins', () => {
     );
     expect(mockRm).toHaveBeenCalledTimes(1);
     expect(mockCore.info).toHaveBeenCalledWith(
-      expect.stringContaining('already installed')
+      expect.stringContaining('Installed Helm v4 plugin')
     );
     // Should not fall back to the legacy install
     expect(mockCore.info).not.toHaveBeenCalledWith(
@@ -534,7 +537,7 @@ describe('installHelmPlugins', () => {
         if (opts?.listeners?.stderr) {
           opts.listeners.stderr(
             Buffer.from(
-              'Error: fork/exec /tmp/helm/plugins/helm-diff-linux-amd64/install-binary.sh: no such file or directory'
+              'Error: fork/exec /tmp/helm/plugins/diff/install-binary.sh: no such file or directory'
             )
           );
         }
@@ -545,12 +548,16 @@ describe('installHelmPlugins', () => {
       // helm plugin list
       .mockResolvedValueOnce(0);
 
+    // Before the attempt the plugins dir is empty; afterwards the extracted
+    // directory (named after the archive's root folder) is left behind
+    mockReaddir.mockResolvedValueOnce([]).mockResolvedValueOnce(['diff']);
+
     await installHelmPlugins([
       'https://github.com/databus23/helm-diff@v3.15.8'
     ]);
 
     expect(mockRm).toHaveBeenCalledWith(
-      path.join('/tmp/helm/plugins', 'helm-diff-linux-amd64'),
+      path.join('/tmp/helm/plugins', 'diff'),
       {
         recursive: true,
         force: true
@@ -669,14 +676,14 @@ describe('installHelmPlugins', () => {
       // helm plugin list
       .mockResolvedValueOnce(0);
 
+    mockReaddir.mockResolvedValueOnce([]).mockResolvedValueOnce(['diff']);
+
     await installHelmPlugins([
       'https://github.com/databus23/helm-diff@v3.15.8'
     ]);
 
     expect(mockCore.warning).toHaveBeenCalledWith(
-      expect.stringContaining(
-        'Failed to clean up partial plugin install for helm-diff-linux-amd64.tgz'
-      )
+      expect.stringContaining('Failed to remove partial plugin directory diff')
     );
     expect(mockExec).toHaveBeenCalledWith(
       'helm',
