@@ -40,6 +40,14 @@ async function run(): Promise<void> {
         core.endGroup();
         break;
       case 'true':
+        // Install helm first so the user's helm-version pin is honored:
+        // `helmfile init` only installs helm itself when none is found on
+        // PATH, and its own install always takes the latest release. Older
+        // helmfile releases then fail against helm v4 (e.g. `helm version
+        // --client` was removed in v4). See issue #816.
+        core.startGroup('Install helm');
+        await Promise.all([installHelm(helmVersion)]);
+        core.endGroup();
         core.startGroup('helmfile init');
         await Promise.all([HelmfileInit()]);
         core.endGroup();

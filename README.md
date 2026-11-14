@@ -17,7 +17,7 @@ This action works on Linux, macOS and Windows
 - `helmfile-workdirectory` : helmfile working directory. Default `"."`
 - `helm-version` : Helm version. Default `"latest"`
 - `helm-plugins` : Comma separated list of Helm plugins to install. Default `https://github.com/databus23/helm-diff`. Supports version pinning using `@version` suffix (e.g., `https://github.com/databus23/helm-diff@v3.1.3`).
-- `helmfile-auto-init` : Whether to run `helmfile init` before running helmfile command. Default `"false"`
+- `helmfile-auto-init` : Whether to run `helmfile init` before running helmfile command. Default `"false"`. When enabled, the action installs `helm-version` first so the pinned version is used instead of the latest helm that `helmfile init` would install itself.
 - `helmfile-kubeconfig-context` : Kubeconfig context. Default `""`, if not empty, it will be written to `$HOME/.kube/config`
 - `helm-diff-color`: Enable helm diff plugin color output. Default `"true"`.
 
